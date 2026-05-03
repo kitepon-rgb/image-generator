@@ -18,7 +18,7 @@ import { getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/sdk/
 import { loadConfig } from './config.js';
 import { openStorage } from './storage.js';
 import { openAuthSubsystem } from './auth.js';
-import { maybeRewriteSseBody, shouldIntercept } from './intercept.js';
+import { makeSseRewriteTransform, shouldIntercept } from './intercept.js';
 
 const config = loadConfig();
 const storage = openStorage(config.dbPath);
@@ -188,23 +188,37 @@ for (const [name, upstream] of Object.entries(config.mcpUpstreams)) {
         res.end();
         return;
       }
-      // 対象 MCP の tools/call 応答だけ intercept する。それ以外 (tools/list 等
-      // discovery, ping, notifications) は従来通り stream pipe で素通し。
+      // mcp-proxy の Streamable HTTP は応答後も SSE を閉じない (long-lived) ので
+      // arrayBuffer() で待つと undici bodyTimeout (5min) で必ず落ちる。
+      // 対象 MCP の tools/call 応答だけ Transform で chunk 単位 SSE rewrite、
+      // それ以外 (tools/list 等 discovery, ping, notifications) は素通し pipe。
+      const upstreamNode = Readable.fromWeb(upstreamRes.body as never);
+      // pipe の error 伝搬は自動でないため両端に handler を付けて image-hub
+      // プロセス自体の uncaught error → crash → restart loop を防ぐ。
+      const onUpstreamErr = (err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[image-hub] upstream stream error for ${name}:`, msg);
+        if (!res.writableEnded) res.end();
+      };
+      upstreamNode.on('error', onUpstreamErr);
+      res.on('close', () => {
+        // クライアント側が close したら upstream も明示的に切る
+        upstreamNode.destroy();
+      });
       if (shouldIntercept(name, req.body)) {
-        const ab = await upstreamRes.arrayBuffer();
-        const original = Buffer.from(ab);
-        const rewritten = maybeRewriteSseBody(original, name, {
+        // body 長が変わるので Content-Length は upstream から渡さない (chunked にする)
+        res.removeHeader('Content-Length');
+        const transform = makeSseRewriteTransform(name, {
           storage,
           storageDir: config.storageDir,
           publicFilesUrlBase: `${config.publicMcpUrl.origin}/files`,
           log: (m) => console.log('[image-hub]', m),
         });
-        // body 長が変わるので Content-Length を再計算させる。
-        res.removeHeader('Content-Length');
-        res.end(rewritten);
-        return;
+        transform.on('error', onUpstreamErr);
+        upstreamNode.pipe(transform).pipe(res);
+      } else {
+        upstreamNode.pipe(res);
       }
-      Readable.fromWeb(upstreamRes.body as never).pipe(res);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[image-hub] proxy error for ${name}:`, message);

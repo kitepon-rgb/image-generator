@@ -21,6 +21,7 @@
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join } from 'node:path';
+import { Transform } from 'node:stream';
 import type { Storage } from './storage.js';
 
 export interface RewriteRule {
@@ -141,57 +142,105 @@ function rewriteText(text: string, rule: RewriteRule, deps: InterceptDeps): { te
   return { text: newText, rewrites };
 }
 
+function rewriteSseEventBlock(block: string, rule: RewriteRule, deps: InterceptDeps): { out: string; rewrites: number } {
+  const ev = parseSseEvent(block);
+  if (ev === null) return { out: block + '\n\n', rewrites: 0 };
+  let parsed: ToolCallEnvelope | null = null;
+  try {
+    parsed = JSON.parse(ev.data) as ToolCallEnvelope;
+  } catch {
+    return { out: reEncodeSseEvent(ev), rewrites: 0 };
+  }
+  const content = parsed.result?.content;
+  if (!Array.isArray(content)) {
+    return { out: reEncodeSseEvent(ev), rewrites: 0 };
+  }
+  let total = 0;
+  let touched = false;
+  for (const item of content) {
+    if (item.type === 'text' && typeof item.text === 'string') {
+      const r = rewriteText(item.text, rule, deps);
+      if (r.rewrites > 0) {
+        item.text = r.text;
+        touched = true;
+        total += r.rewrites;
+      }
+    }
+  }
+  return {
+    out: touched ? reEncodeSseEvent({ ...ev, data: JSON.stringify(parsed) }) : reEncodeSseEvent(ev),
+    rewrites: total,
+  };
+}
+
+// Streaming SSE rewrite Transform。upstream の Streamable HTTP は完了後も
+// keep-alive で stream を閉じないため、buffering 戦略 (arrayBuffer) は undici
+// の bodyTimeout (5 min) で死ぬ。Transform 経由で chunk が来た順に \n\n 区切りで
+// イベントを切り出して書き戻し、stream 自体は閉じずに pipe しっぱなしにする。
+export function makeSseRewriteTransform(ruleName: string, deps: InterceptDeps): Transform {
+  const rule = REWRITE_RULES[ruleName];
+  let textBuf = '';
+  let totalRewrites = 0;
+  const transform = new Transform({
+    transform(chunk: Buffer | string, _enc, callback) {
+      try {
+        textBuf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        let idx: number;
+        while ((idx = textBuf.search(/\r?\n\r?\n/)) !== -1) {
+          // separator のバイト数 (CRLF or LF) を保つ
+          const sepMatch = textBuf.slice(idx).match(/^\r?\n\r?\n/);
+          const sepLen = sepMatch !== null ? sepMatch[0].length : 2;
+          const block = textBuf.slice(0, idx);
+          textBuf = textBuf.slice(idx + sepLen);
+          if (block.length === 0) {
+            // empty event (keepalive ping etc) — 元のまま re-emit
+            this.push('\n\n');
+            continue;
+          }
+          if (rule === undefined) {
+            // rule がない (ruleName 不在) なら rewrite せず素通し
+            this.push(block + '\n\n');
+            continue;
+          }
+          const r = rewriteSseEventBlock(block, rule, deps);
+          totalRewrites += r.rewrites;
+          this.push(r.out);
+        }
+        callback();
+      } catch (e) {
+        callback(e instanceof Error ? e : new Error(String(e)));
+      }
+    },
+    flush(callback) {
+      if (textBuf.length > 0) {
+        // 末尾に separator なしで切れた残骸はそのまま流す
+        this.push(textBuf);
+        textBuf = '';
+      }
+      if (totalRewrites > 0) {
+        deps.log(`intercept[${ruleName}]: rewrote ${totalRewrites} path(s) to /files URL`);
+      }
+      callback();
+    },
+  });
+  return transform;
+}
+
+// 互換 API (1 ショット buffer 入力用、test や非 streaming 経路向け)。
 export function maybeRewriteSseBody(body: Buffer, ruleName: string, deps: InterceptDeps): Buffer {
   const rule = REWRITE_RULES[ruleName];
   if (rule === undefined) return body;
-
   const text = body.toString('utf8');
   const blocks = splitSseEvents(text);
-
   let totalRewrites = 0;
   const out: string[] = [];
   for (let i = 0; i < blocks.length; i += 1) {
     const block = blocks[i];
-    if (block === undefined || block.length === 0) {
-      // SSE 末尾の空 chunk (input が "...\n\n" で終わっていた場合)。
-      // 区切りは reEncodeSseEvent が "\n\n" を付けるので、ここでは何も足さない。
-      continue;
-    }
-    const ev = parseSseEvent(block);
-    if (ev === null) {
-      out.push(block + '\n\n');
-      continue;
-    }
-    let parsed: ToolCallEnvelope | null = null;
-    try {
-      parsed = JSON.parse(ev.data) as ToolCallEnvelope;
-    } catch {
-      out.push(reEncodeSseEvent(ev));
-      continue;
-    }
-    const content = parsed.result?.content;
-    if (!Array.isArray(content)) {
-      out.push(reEncodeSseEvent(ev));
-      continue;
-    }
-    let touched = false;
-    for (const item of content) {
-      if (item.type === 'text' && typeof item.text === 'string') {
-        const r = rewriteText(item.text, rule, deps);
-        if (r.rewrites > 0) {
-          item.text = r.text;
-          touched = true;
-          totalRewrites += r.rewrites;
-        }
-      }
-    }
-    if (touched) {
-      out.push(reEncodeSseEvent({ ...ev, data: JSON.stringify(parsed) }));
-    } else {
-      out.push(reEncodeSseEvent(ev));
-    }
+    if (block === undefined || block.length === 0) continue;
+    const r = rewriteSseEventBlock(block, rule, deps);
+    totalRewrites += r.rewrites;
+    out.push(r.out);
   }
-
   if (totalRewrites === 0) return body;
   deps.log(`intercept[${ruleName}]: rewrote ${totalRewrites} path(s) to /files URL`);
   return Buffer.from(out.join(''), 'utf8');

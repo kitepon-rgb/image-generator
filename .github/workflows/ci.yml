@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  typecheck:
+    name: typecheck (image-hub-app)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: server/image-hub-app/package.json
+      - name: Install
+        working-directory: server/image-hub-app
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        working-directory: server/image-hub-app
+        run: npx tsc --noEmit
+
+  compose-validate:
+    name: compose config validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate placeholder .env
+        working-directory: server
+        run: |
+          cp .env.example .env
+          sed -i 's|change-me-to-a-long-random-string|placeholder-signing-key|g' .env
+          sed -i 's|change-me-to-something-only-you-know|placeholder-passcode|g' .env
+          sed -i 's|sk-proj-PLACEHOLDER|sk-proj-placeholder|g' .env
+      - name: Validate compose.yml
+        working-directory: server
+        run: docker compose config --quiet

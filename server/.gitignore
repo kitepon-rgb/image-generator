@@ -1,0 +1,16 @@
+.env
+*.env
+!.env.example
+storage/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+node_modules/
+dist/
+build/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

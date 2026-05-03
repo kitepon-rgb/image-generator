@@ -1,0 +1,29 @@
+{
+  "name": "image-hub-app",
+  "version": "0.1.0",
+  "description": "OAuth 2.1 + reverse proxy + files server for image-hub.kitepon.dynv6.net",
+  "type": "module",
+  "main": "dist/index.js",
+  "engines": { "node": ">=22.0.0" },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.9.0",
+    "express": "^5.2.1",
+    "http-proxy-middleware": "^3.0.5",
+    "jose": "^5.9.6"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "license": "MIT"
+}

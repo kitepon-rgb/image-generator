@@ -1,0 +1,114 @@
+# image-hub: 画像/作図 MCP 3 本を 1 サブドメインに集約
+# 既存の Caddy (license-server compose 所有) が外部 TLS + reverse proxy を担う前提。
+# このフォルダ内の docker compose は、Caddy から内部ネットワーク経由で見えるサービスを並べる。
+#
+# デプロイ手順:
+#   rsync -av --exclude .env --exclude storage/ ./ kite@192.168.1.2:/home/kite/image-hub/
+#   ssh kite@192.168.1.2 'cd /home/kite/image-hub && docker compose up -d --build'
+#   (.env はサーバー側で別途配置、storage/ は volume として扱う)
+
+services:
+  image-hub:
+    build:
+      context: ./image-hub-app
+      dockerfile: Dockerfile
+    image: image-hub-app:latest
+    container_name: image-hub
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      IMAGEHUB_PORT: 18810
+      # 内部 docker network 経由の各 MCP のアドレス
+      # mcp-proxy 6.x の Streamable HTTP エンドポイント (/mcp) を使う。
+      # SSE (/sse) はリバプロ越しで messages の relative URL が崩れるため不採用。
+      MCP_OPENAI_IMAGE_URL: http://openai-image-mcp:8001/mcp
+      MCP_EXCALIDRAW_URL:   http://excalidraw-mcp:8002/mcp
+      MCP_MERMAID_URL:      http://mermaid-mcp:8003/mcp
+      # ストレージ
+      IMAGEHUB_STORAGE_DIR: /var/lib/image-hub/storage
+      IMAGEHUB_DB_PATH:     /var/lib/image-hub/image-hub.db
+    volumes:
+      - ./storage:/var/lib/image-hub/storage
+      - image-hub-data:/var/lib/image-hub
+    ports:
+      # LAN 限定 listen (Caddy が同ホストから内部ネットワーク経由で叩ける)
+      - "192.168.1.2:18810:18810"
+    depends_on:
+      openai-image-mcp:
+        condition: service_healthy
+      excalidraw-mcp:
+        condition: service_healthy
+      mermaid-mcp:
+        condition: service_healthy
+    networks:
+      - image-hub-net
+
+  openai-image-mcp:
+    build:
+      context: ./openai-image-mcp
+      dockerfile: Dockerfile
+    image: image-hub-openai-image:latest
+    container_name: image-hub-openai-image
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MCP_PROXY_PORT: 8001
+    # mcp-proxy の /sse は閉じない long-lived stream なので、GET だと wget が必ず timeout する。
+    # TCP 開通だけ確認する (Python は image に既存)。
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.create_connection(('127.0.0.1',8001),timeout=2); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - image-hub-net
+
+  excalidraw-mcp:
+    build:
+      context: ./excalidraw-mcp
+      dockerfile: Dockerfile
+    image: image-hub-excalidraw:latest
+    container_name: image-hub-excalidraw
+    restart: unless-stopped
+    environment:
+      MCP_PROXY_PORT: 8002
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(8002,'127.0.0.1').once('connect',()=>process.exit(0)).once('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - image-hub-net
+
+  mermaid-mcp:
+    build:
+      context: ./mermaid-mcp
+      dockerfile: Dockerfile
+    image: image-hub-mermaid:latest
+    container_name: image-hub-mermaid
+    restart: unless-stopped
+    environment:
+      MCP_PROXY_PORT: 8003
+      # Puppeteer の Chromium auto-DL を無効化、apt の chromium を使う
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(8003,'127.0.0.1').once('connect',()=>process.exit(0)).once('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - image-hub-net
+
+volumes:
+  image-hub-data:
+    driver: local
+
+networks:
+  image-hub-net:
+    driver: bridge

@@ -1,0 +1,26 @@
+# Secrets / runtime state — never commit
+.env
+*.env
+!.env.example
+**/storage/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Build artifacts
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Project-internal scratch (not for OSS release)
+.spotter/
+.claude/

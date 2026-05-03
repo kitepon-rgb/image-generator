@@ -1,0 +1,22 @@
+# Caddy snippet for image-hub
+# 192.168.1.2 上の /home/kite/license-server/Caddyfile の末尾にこの
+# ホストブロックを追記し、`docker exec caddy caddy reload --config
+# /etc/caddy/Caddyfile` で反映する。
+#
+# 関連 caveat: kitepon.dynv6.net 直下のパスベースで MCP を並べると
+# ConnectX2C に吸い込まれて壊れる (memory: feedback_subdomain_per_mcp)。
+# 必ず独立サブドメインで切り出すこと。
+
+image-hub.kitepon.dynv6.net {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-X-Powered-By
+		-Server
+	}
+	reverse_proxy 192.168.1.2:18810 {
+		flush_interval -1
+	}
+}

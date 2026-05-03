@@ -127,7 +127,7 @@ Claude Code 再起動 → ブラウザで OAuth (1 つずつ完走させる、�
 | 2 | **`http-proxy-middleware` v3 + Express 5 で silent fail。** bearer は通るが upstream に届かず client が 30 秒 timeout、ログにも痕跡なし。 | 40 行の `node:fetch` フォワーダに置換。[`server/image-hub-app/src/index.ts`](server/image-hub-app/src/index.ts) の `app.all(mcpPath, bearer, async ...)` ブロック。 |
 | 3 | **Puppeteer/Chromium が root 起動を拒否。** `claude-mermaid` 側に `--no-sandbox` を渡す経路がない。 | Dockerfile で `/usr/bin/chromium` をラッパに差し替え、`--no-sandbox --disable-dev-shm-usage` を強制注入。[`server/mermaid-mcp/Dockerfile`](server/mermaid-mcp/Dockerfile)。 |
 
-OAuth 注意: Claude Code は **1 session で同時に複数 MCP の OAuth flow state を保持できない**疑いがある。3 サーバーは 1 つずつ完走させる。
+OAuth 注意: **同一 MCP サーバー** に対して 2 つのフロー (例: VSCode MCP パネルの click と `authenticate` ツール呼び出し) を同時に走らせない。Claude Code の flow state はサーバー名でキー付けされた単一スロットらしく、後発の起動が前の state を上書きして `complete_authentication` が「No OAuth flow is in progress」で失敗する。入口は片方だけに絞る。
 
 ## プロジェクト構成
 

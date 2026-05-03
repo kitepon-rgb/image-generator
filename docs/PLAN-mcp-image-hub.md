@@ -253,7 +253,7 @@ MCP レスポンス JSON: `{ "id": "abc123", "url": "https://image-hub.kitepon.d
 | L-2 | `http-proxy-middleware` v3 + Express 5 の組合せが silent fail (bearer 通過後 upstream に到達しない、proxy ログにも upstream ログにも痕跡なし、client 30s timeout) | **`node:fetch` 直叩きの素朴フォワーダに置換** ([server/image-hub-app/src/index.ts](../server/image-hub-app/src/index.ts) の `app.all(mcpPath, bearer, async ...)`) | 同上 |
 | L-3 | `mcp-proxy` 6.x の Streamable HTTP は `/mcp` 厳密一致、`/mcp/` (trailing slash) で 404 | fetch ベース実装にしたので回避 | 同上 |
 | L-4 | `claude-mermaid` 内部の puppeteer / chromium が root 起動を拒否 | **Dockerfile で `/usr/bin/chromium` をラッパに差し替え `--no-sandbox --disable-dev-shm-usage` 強制注入** ([server/mermaid-mcp/Dockerfile](../server/mermaid-mcp/Dockerfile)) | 同上 |
-| L-5 | Claude Code MCP OAuth は session あたり 1 件しか flow state を持てない疑い (2 件目以降「No OAuth flow is in progress」で失敗) | 3 サーバー初回認可は **1 つずつ完走させる** (VSCode GUI からのクリックで 1 件ずつ Authentication Successful を確認) | memory `feedback_mcp_oauth_one_per_session` |
+| L-5 | Claude Code MCP OAuth: **同一サーバーへ 2 つの flow を並行起動すると state が上書きされる** (VSCode MCP パネル click と `authenticate` ツールを同時に走らせると後発が code_verifier を上書き → 「No OAuth flow is in progress」)。session 全体での flow 数制約や cross-server 衝突は未検証 | 1 サーバーの認可は **GUI クリック OR `authenticate` ツール、どちらか一方だけ** で進める。サーバー間は 1 つずつ Connected を確認しながら順次 | memory `feedback_mcp_oauth_one_per_session` |
 
 ## 6. 実装フォルダ構成
 

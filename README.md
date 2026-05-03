@@ -129,7 +129,7 @@ While building this, three non-obvious traps surfaced. The fixes are baked into 
 | 2 | **`http-proxy-middleware` v3 + Express 5 silently fail.** Bearer middleware passes, but the request never reaches upstream and the client times out at 30 s — no error logged anywhere. | Replace with a 40-line `node:fetch` forwarder. See [`server/image-hub-app/src/index.ts`](server/image-hub-app/src/index.ts) — the `app.all(mcpPath, bearer, async ...)` block. |
 | 3 | **Puppeteer/Chromium refuses to run as root in containers.** `claude-mermaid` provides no flag to inject `--no-sandbox`. | In the Dockerfile, swap `/usr/bin/chromium` for a wrapper that always passes `--no-sandbox --disable-dev-shm-usage`. See [`server/mermaid-mcp/Dockerfile`](server/mermaid-mcp/Dockerfile). |
 
-Plus an OAuth gotcha: Claude Code seems to hold only **one in-flight OAuth flow per session**. Authorize each of the 3 MCPs sequentially, not in parallel.
+Plus an OAuth gotcha: don't fire two OAuth flows for the **same** MCP server simultaneously (e.g. clicking the VSCode MCP panel *and* calling the `authenticate` tool). The flow state is keyed per server and gets overwritten — the second `complete_authentication` then fails with "No OAuth flow is in progress". Use one entry path at a time.
 
 ## Project structure
 

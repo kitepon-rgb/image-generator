@@ -93,7 +93,7 @@ ssh kite@192.168.1.2 'cd /home/kite/image-hub && docker compose up -d --build'
 
 ## OAuth 認可の進め方 (3 サーバー初回)
 
-memory `feedback_mcp_oauth_one_per_session` の通り、**1 セッションで複数 MCP の OAuth flow state を持てない疑い**がある。そのため:
+memory `feedback_mcp_oauth_one_per_session` の通り、**同一 MCP サーバーに対して 2 つの OAuth flow を並行起動すると state が上書きされる** (VSCode の MCP パネル click と `authenticate` ツール呼び出しを同時に走らせない)。安全策として 1 サーバーずつ順次:
 
 1. `mermaid` だけ認可 → Connected を確認 → 次へ
 2. `excalidraw` を認可 → Connected を確認 → 次へ

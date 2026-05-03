@@ -42,6 +42,7 @@ Windows 側に stdio で登録されていた画像/作図系 MCP サーバー 3
 - **`OPENAI_API_KEY` 露出履歴**: 旧鍵がこの計画の元になったチャットで露出済み → Phase 3-2 で再発行済 (project key 名 `image-hub`)。新規にコード/設定例を書くときも旧鍵を使い回さない。
 - **`.env` は絶対 commit しない**: `server/.gitignore` で除外済。バックアップにも `.env*` exclude (Day-1 で実機検証済)。
 - **claude-spotter で WSL2 から Windows 側 MCP を収集する場合**: 1.2.2 以上を使う。
+- **`/mcp/<name>` は 3 経路の認可** (2026-05-04 追加): (1) JSON-RPC method が discovery 系 (`initialize` / `tools/list` / `prompts/list` / `resources/list` / `resources/templates/list` / `notifications/initialized` / `notifications/cancelled` / `ping`) なら bearer 不要 (2) `Authorization: Bearer ${IMAGEHUB_STATIC_BEARER_TOKEN}` 一致なら OAuth 検証 skip (3) それ以外は従来の OAuth bearer 検証。理由: Spotter 等の外部 catalog 消費者は OAuth トークンを持てないので `tools/list` が 401 で取れない / Bell のような OAuth フロー回せない隔離 Claude も救う必要があった。実装は [server/image-hub-app/src/index.ts](server/image-hub-app/src/index.ts) の `mcpAuth` ミドルウェア。静的トークンは `IMAGEHUB_STATIC_BEARER_TOKEN` を `.env` に置く (32 文字以上、空なら経路 (2) は無効化)。漏洩時のローテは `openssl rand -hex 32` で再発行 → ローカル + prod `.env` 両方更新 → `docker compose up -d --build image-hub`。
 
 ## デプロイ
 

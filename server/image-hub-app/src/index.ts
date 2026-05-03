@@ -90,6 +90,36 @@ const bearer = requireBearerAuth({
   resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(config.publicMcpUrl),
 });
 
+// /mcp/* 用: discovery メソッド (tools/list 等) は bearer 不要、
+// 静的 bearer トークンが一致したら OAuth 検証を skip。それ以外は通常の bearer に委譲。
+// Spotter / Bell など catalog だけ欲しい消費者と、長寿トークンで運用したい消費者の両方を救う。
+const DISCOVERY_METHODS = new Set([
+  'initialize',
+  'tools/list',
+  'prompts/list',
+  'resources/list',
+  'resources/templates/list',
+  'notifications/initialized',
+  'notifications/cancelled',
+  'ping',
+]);
+const STATIC_BEARER_HEADER = config.staticBearerToken !== null
+  ? `Bearer ${config.staticBearerToken}`
+  : null;
+const mcpAuth: express.RequestHandler = (req, res, next) => {
+  if (STATIC_BEARER_HEADER !== null && req.headers.authorization === STATIC_BEARER_HEADER) {
+    next();
+    return;
+  }
+  const body = req.body as { method?: unknown } | undefined;
+  const method = body !== undefined && typeof body.method === 'string' ? body.method : null;
+  if (method !== null && DISCOVERY_METHODS.has(method)) {
+    next();
+    return;
+  }
+  bearer(req, res, next);
+};
+
 // --- /files/{id} 配信 (Bearer 必須) ---
 app.get(`/files/:id`, bearer, async (req: Request, res: Response) => {
   const idParam = req.params.id;
@@ -127,7 +157,7 @@ const HOP_BY_HOP = new Set([
 
 for (const [name, upstream] of Object.entries(config.mcpUpstreams)) {
   const mcpPath = `${mcpBasePath}/${name}`;
-  app.all(mcpPath, bearer, async (req: Request, res: Response) => {
+  app.all(mcpPath, mcpAuth, async (req: Request, res: Response) => {
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(req.headers)) {
       if (HOP_BY_HOP.has(k.toLowerCase())) continue;

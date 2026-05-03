@@ -98,6 +98,77 @@ ssh kite@192.168.1.2 'sed -i "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=sk-proj-NEWKEY
 
 OAuth トークン取得は Claude Code の MCP HTTP transport が動的に処理 (Dynamic Client Registration 経由)。初回は admin passcode で consent 承認が必要。
 
+## 認可の 3 経路 (2026-05-04 追加: 案 3 + option B)
+
+`/mcp/<name>` は 1 つの middleware (`mcpAuth` in [image-hub-app/src/index.ts](image-hub-app/src/index.ts)) で 3 経路に分岐する。
+
+1. **無認可 discovery**: JSON-RPC body の `method` が次の集合のときは bearer 不要で upstream へ素通し。
+   - `initialize` / `tools/list` / `prompts/list` / `resources/list` / `resources/templates/list` / `notifications/initialized` / `notifications/cancelled` / `ping`
+   - 用途: Spotter / Bell など OAuth トークンを持てない外部 catalog 消費者でもツール一覧を見られるようにする。
+   - 危険: ツール名 / description / 入出力スキーマは漏れる。実コンテンツ (`/files/{id}`) や `tools/call` は遮断のまま。
+2. **静的 bearer**: `Authorization: Bearer ${IMAGEHUB_STATIC_BEARER_TOKEN}` がリクエストヘッダにあり値が一致したら OAuth 検証を skip。
+   - 用途: Bell のような OAuth フローを回せない隔離 Claude が `tools/call` まで通るようにする。
+   - 設定: `.env` に `IMAGEHUB_STATIC_BEARER_TOKEN=<openssl rand -hex 32>` を置く (32 文字以上必須、空なら経路 2 は無効)。
+   - 危険: トークン漏洩 = OPENAI クレジット燃焼に直結。OAuth トークン同等の取扱い。漏洩したら即ローテ:
+     ```bash
+     # 新トークンを生成
+     NEW=$(openssl rand -hex 32)
+     # ローカル .env を差し替え
+     sed -i "s|^IMAGEHUB_STATIC_BEARER_TOKEN=.*|IMAGEHUB_STATIC_BEARER_TOKEN=$NEW|" .env
+     # 本番側を更新
+     ssh kite@192.168.1.2 "sed -i 's|^IMAGEHUB_STATIC_BEARER_TOKEN=.*|IMAGEHUB_STATIC_BEARER_TOKEN=$NEW|' /home/kite/image-hub/.env && cd /home/kite/image-hub && docker compose up -d --build image-hub"
+     # 静的 bearer を使う各クライアント (Bell の .mcp.json 等) も同期更新
+     ```
+3. **OAuth bearer**: 上 2 つに該当しなければ従来通り `requireBearerAuth` で audience-bound JWT を検証。
+
+検証 5 ケース (デプロイ後に都度走らせる):
+
+```bash
+TOKEN=<IMAGEHUB_STATIC_BEARER_TOKEN の値>
+HDR=$(mktemp)
+# 1) anon initialize → 200
+curl -sS -o /dev/null -D "$HDR" -w '1) %{http_code}\n' \
+  -X POST https://image-hub.kitepon.dynv6.net/mcp/mermaid \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"v","version":"1"}}}'
+SID=$(grep -i '^mcp-session-id:' "$HDR" | tr -d '\r' | awk '{print $2}')
+# 2) anon tools/list → 200
+curl -sS -o /dev/null -w '2) %{http_code}\n' \
+  -X POST https://image-hub.kitepon.dynv6.net/mcp/mermaid \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H "mcp-session-id: $SID" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+# 3) anon tools/call → 401
+curl -sS -o /dev/null -w '3) %{http_code}\n' \
+  -X POST https://image-hub.kitepon.dynv6.net/mcp/mermaid \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H "mcp-session-id: $SID" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"x"}}'
+# 4) wrong bearer → 401 (500 ではない)
+curl -sS -o /dev/null -w '4) %{http_code}\n' \
+  -X POST https://image-hub.kitepon.dynv6.net/mcp/mermaid \
+  -H 'Authorization: Bearer wrong-token-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H "mcp-session-id: $SID" \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"x"}}'
+# 5) static-bearer tools/call → 200 (引数不正の application エラーは可)
+HDR2=$(mktemp)
+curl -sS -o /dev/null -D "$HDR2" \
+  -X POST https://image-hub.kitepon.dynv6.net/mcp/mermaid \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"v","version":"1"}}}'
+SID2=$(grep -i '^mcp-session-id:' "$HDR2" | tr -d '\r' | awk '{print $2}')
+curl -sS -o /dev/null -w '5) %{http_code}\n' \
+  -X POST https://image-hub.kitepon.dynv6.net/mcp/mermaid \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H "mcp-session-id: $SID2" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mermaid_preview","arguments":{"diagram":"graph LR;A-->B"}}}'
+```
+
+期待値: `1) 200 / 2) 200 / 3) 401 / 4) 401 / 5) 200`。4 が 500 になる場合は `verifyAccessToken` 内の例外が `InvalidTokenError` で正規化されていないので [image-hub-app/src/auth.ts](image-hub-app/src/auth.ts) を確認。
+
 ## トラブルシュート
 
 - **502**: image-hub コンテナ未起動 or 内部 MCP の healthcheck failure。`docker compose ps` と `docker compose logs image-hub` を確認

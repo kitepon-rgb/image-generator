@@ -7,6 +7,7 @@ export interface Config {
   readonly publicAuthUrl: URL;
   readonly oauthSigningKey: string;
   readonly adminPasscode: string;
+  readonly staticBearerToken: string | null;
   readonly storageDir: string;
   readonly dbPath: string;
   readonly mcpUpstreams: Readonly<Record<string, string>>;
@@ -43,6 +44,11 @@ export function loadConfig(): Config {
   if (adminPasscode.length < 8) {
     throw new Error('IMAGEHUB_ADMIN_PASSCODE must be at least 8 characters');
   }
+  const rawStaticToken = process.env.IMAGEHUB_STATIC_BEARER_TOKEN ?? '';
+  const staticBearerToken = rawStaticToken.length > 0 ? rawStaticToken : null;
+  if (staticBearerToken !== null && staticBearerToken.length < 32) {
+    throw new Error('IMAGEHUB_STATIC_BEARER_TOKEN must be at least 32 characters when set');
+  }
 
   return {
     port,
@@ -50,6 +56,7 @@ export function loadConfig(): Config {
     publicAuthUrl: parseUrl('IMAGEHUB_PUBLIC_AUTH_URL'),
     oauthSigningKey,
     adminPasscode,
+    staticBearerToken,
     storageDir: process.env.IMAGEHUB_STORAGE_DIR ?? '/var/lib/image-hub/storage',
     dbPath: process.env.IMAGEHUB_DB_PATH ?? '/var/lib/image-hub/image-hub.db',
     mcpUpstreams: Object.freeze({

@@ -18,6 +18,7 @@ import { getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/sdk/
 import { loadConfig } from './config.js';
 import { openStorage } from './storage.js';
 import { openAuthSubsystem } from './auth.js';
+import { maybeRewriteSseBody, shouldIntercept } from './intercept.js';
 
 const config = loadConfig();
 const storage = openStorage(config.dbPath);
@@ -120,8 +121,10 @@ const mcpAuth: express.RequestHandler = (req, res, next) => {
   bearer(req, res, next);
 };
 
-// --- /files/{id} 配信 (Bearer 必須) ---
-app.get(`/files/:id`, bearer, async (req: Request, res: Response) => {
+// --- /files/{id} 配信 (静的 bearer または OAuth bearer) ---
+// /mcp/ と同じ mcpAuth を流用 (Bell など長寿トークン消費者からの取得を許可)。
+// GET-only handler で req.body は undefined なので discovery method 例外は発火しない。
+app.get(`/files/:id`, mcpAuth, async (req: Request, res: Response) => {
   const idParam = req.params.id;
   const id = typeof idParam === 'string' ? idParam : '';
   // basename チェック (path traversal 防止)
@@ -181,11 +184,27 @@ for (const [name, upstream] of Object.entries(config.mcpUpstreams)) {
         if (HOP_BY_HOP.has(key.toLowerCase())) return;
         res.setHeader(key, value);
       });
-      if (upstreamRes.body !== null) {
-        Readable.fromWeb(upstreamRes.body as never).pipe(res);
-      } else {
+      if (upstreamRes.body === null) {
         res.end();
+        return;
       }
+      // 対象 MCP の tools/call 応答だけ intercept する。それ以外 (tools/list 等
+      // discovery, ping, notifications) は従来通り stream pipe で素通し。
+      if (shouldIntercept(name, req.body)) {
+        const ab = await upstreamRes.arrayBuffer();
+        const original = Buffer.from(ab);
+        const rewritten = maybeRewriteSseBody(original, name, {
+          storage,
+          storageDir: config.storageDir,
+          publicFilesUrlBase: `${config.publicMcpUrl.origin}/files`,
+          log: (m) => console.log('[image-hub]', m),
+        });
+        // body 長が変わるので Content-Length を再計算させる。
+        res.removeHeader('Content-Length');
+        res.end(rewritten);
+        return;
+      }
+      Readable.fromWeb(upstreamRes.body as never).pipe(res);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[image-hub] proxy error for ${name}:`, message);

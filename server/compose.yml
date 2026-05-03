@@ -31,6 +31,9 @@ services:
     volumes:
       - ./storage:/var/lib/image-hub/storage
       - image-hub-data:/var/lib/image-hub
+      # openai-image-mcp が tmp に書いた生成物を proxy intercept で /files/<id> に
+      # 昇格するため ro マウント (path は両 service で同一)。
+      - openai-image-tmp:/var/lib/openai-image-tmp:ro
     ports:
       # LAN 限定 listen (Caddy が同ホストから内部ネットワーク経由で叩ける)
       - "192.168.1.2:18810:18810"
@@ -55,6 +58,11 @@ services:
       - .env
     environment:
       MCP_PROXY_PORT: 8001
+      # 生成物の出力先 (Python tempfile.mkdtemp が TMPDIR を見る)。
+      # 同名 volume を image-hub-app にも ro マウントし proxy が intercept する。
+      TMPDIR: /var/lib/openai-image-tmp
+    volumes:
+      - openai-image-tmp:/var/lib/openai-image-tmp
     # mcp-proxy の /sse は閉じない long-lived stream なので、GET だと wget が必ず timeout する。
     # TCP 開通だけ確認する (Python は image に既存)。
     healthcheck:
@@ -107,6 +115,9 @@ services:
 
 volumes:
   image-hub-data:
+    driver: local
+  # openai-image-mcp の Python tempfile 出力先 (TMPDIR)。image-hub-app から ro 参照される。
+  openai-image-tmp:
     driver: local
 
 networks:

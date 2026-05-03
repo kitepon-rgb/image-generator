@@ -14,6 +14,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 RUN uv tool install git+https://github.com/kazyam53/openai_gen_image_mcp.git
 RUN npm install -g mcp-proxy
 
+# sitecustomize.py で tempfile.mkdtemp の mode を 0o755 に補正
+# (image-hub-app コンテナ uid 1000 から ro 参照するため、root 0o700 だと EACCES)
+COPY sitecustomize.py /opt/sitecustomize/sitecustomize.py
+ENV PYTHONPATH=/opt/sitecustomize
+
 ENV MCP_PROXY_PORT=8001
 EXPOSE 8001
 CMD ["sh", "-c", "mcp-proxy --port ${MCP_PROXY_PORT} --host 0.0.0.0 -- /root/.local/bin/openai-gen-image-mcp"]

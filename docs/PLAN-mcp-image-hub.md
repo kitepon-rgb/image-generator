@@ -305,7 +305,8 @@ Phase 2.A / 3-2 までは `openai-image` ルートが OpenAI Platform に直課�
 |---|---|---|
 | `openai-image-mcp` コンテナの中身 | `kazyam53/openai_gen_image_mcp` (Python、uv tool install) | 自前 [server.py](../server/openai-image-mcp/server.py) (fastmcp ラッパ、 HermesAgent MCP に JSON-RPC で `tools/call generate_image` を投げる) |
 | `OPENAI_API_KEY` | `.env` 必須 | 廃止 (.env.example からも削除) |
-| 新環境変数 | — | `HERMES_MCP_URL` / `HERMES_BEARER_TOKEN` |
+| 新環境変数 | — | `HERMES_MCP_URL` / `HERMES_OAUTH_STATE_PATH` (OAuth state file path, default `/var/lib/hermes-oauth/state.json`) |
+| Hermes 認証 | — | MCP 標準 OAuth 2.1 (DCR + authorization_code + refresh_token rotation)。 初回 consent は [bootstrap_oauth.py](../server/openai-image-mcp/bootstrap_oauth.py) をブラウザがある手元のマシンで 1 回走らせ、 出力 state を prod の `/home/kite/image-hub/hermes_oauth/state.json` に scp → compose.yml の bind mount でコンテナから rw。 server.py が refresh_token rotation を自動運用、 新 token を atomic write (.tmp → rename + chmod 0o600) で書き戻し |
 | 課金経路 | OpenAI Platform (prepaid + クレジットガード) | HermesAgent 側の SuperGrok / Premium Plus OAuth セッション (実質ゼロ) |
 | `sitecustomize.py` monkey-patch | あり (Python `tempfile.mkdtemp` の 0o700 を 0o755 に補正) | server.py 内で `os.chmod(sub, 0o755)` を明示呼び出し、ファイル削除 |
 | 互換維持の範囲 | — | service 名 `openai-image-mcp` / volume 名 `openai-image-tmp` / 出力 path 形式 `/var/lib/openai-image-tmp/openai_gen_image_*/generated_*.{png,jpg,webp}` / image-hub-app の REWRITE_RULES key `openai-image` / クライアントの `~/.claude.json` URL `/mcp/openai-image` — すべて温存 |
@@ -322,9 +323,13 @@ Phase 2.A / 3-2 までは `openai-image` ルートが OpenAI Platform に直課�
 
 ### 残作業 (運用)
 
-- [ ] HermesAgent 側のサブドメイン公開設定 (`hermes.kitepon.dynv6.net` 等) と静的 bearer (`HERMES_BEARER_TOKEN` 相当) が安定運用に乗っていることを継続観察。Hermes 側が落ちると image-hub の openai-image ルートも 5xx になる。
-- [ ] 旧 OpenAI 鍵 (`image-hub` project key) の最終 unbind 確認 (OpenAI Platform 管理画面で revoke)。
-- [ ] 新スキーマで失敗するクライアント呼び出しが残っていないか、初回数回の呼び出しログで確認。
+- [x] e2e 検証 (2026-05-18): `tools/call generate_image` → `https://image-hub.kitepon.dynv6.net/files/<sha12>.jpg` 配信まで成功
+- [x] NAT hairpin 回避: `hermes.kitepon.dynv6.net` を public DNS で引くと自分の WAN IP に解決 → 接続 timeout。 compose.yml の `extra_hosts: ["hermes.kitepon.dynv6.net:192.168.1.2"]` で LAN 直結に切り替えて解決
+- [ ] HermesAgent サブドメイン (`hermes.kitepon.dynv6.net`) と Hermes プロセス自体の安定運用継続観察。Hermes が落ちると image-hub の openai-image ルートも 5xx
+- [ ] OAuth state ファイル (`/home/kite/image-hub/hermes_oauth/state.json`) のバックアップ運用。失うと re-bootstrap が必要 (= ブラウザ consent をもう 1 回回す)
+- [ ] refresh_token 失効監視。通常使用なら rotation で永続更新だが、30 日以上未使用 or Hermes 側で revoke されたら再 bootstrap が必要
+- [ ] 旧 OpenAI 鍵 (`image-hub` project key) の最終 unbind 確認 (OpenAI Platform 管理画面で revoke)
+- [ ] 新スキーマで失敗するクライアント呼び出しが残っていないか、初回数回の呼び出しログで確認
 
 ### tool docstring の方針 (2026-05-18 確定)
 

@@ -63,6 +63,15 @@ services:
       TMPDIR: /var/lib/openai-image-tmp
     volumes:
       - openai-image-tmp:/var/lib/openai-image-tmp
+      # Hermes OAuth state (access_token / refresh_token / DCR client_info)。
+      # 初回 bootstrap_oauth.py で生成 → scp で host に置く → ここに bind mount。
+      # server.py が refresh_token rotation のたびに新 token を書き戻す。
+      - /home/kite/image-hub/hermes_oauth:/var/lib/hermes-oauth
+    # HermesAgent (hermes.kitepon.dynv6.net) は同ホスト 192.168.1.2 の Caddy で
+    # 公開されているため、コンテナ内で public DNS を引くと自分の WAN IP に
+    # 解決 → NAT hairpin で落ちる。LAN IP に直接振って回避。
+    extra_hosts:
+      - "hermes.kitepon.dynv6.net:192.168.1.2"
     # mcp-proxy の /sse は閉じない long-lived stream なので、GET だと wget が必ず timeout する。
     # TCP 開通だけ確認する (Python は image に既存)。
     healthcheck:

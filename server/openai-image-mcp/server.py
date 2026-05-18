@@ -3,22 +3,37 @@
 OpenAI 課金から脱却するため、旧 upstream (kazyam53/openai_gen_image_mcp) を置換。
 出力 path 形式 (/var/lib/openai-image-tmp/openai_gen_image_*/generated_*.{ext}) は
 image-hub-app の intercept.ts (REWRITE_RULES['openai-image']) に拾わせるため
-そのまま維持する。service 名・MCP 名・volume 名も互換のため `openai-image` を
-保持しているが、実体の billing path は SuperGrok/Premium Plus 経由で課金ゼロ。
+そのまま維持する。
+
+HermesAgent 接続: MCP 標準 OAuth 2.1 (DCR + authorization_code + refresh_token
+rotation) を使用。初回 consent はブラウザ必須なので bootstrap_oauth.py を 1 回
+手動で走らせて state ファイルを生成 → このコンテナの HERMES_OAUTH_STATE_PATH
+(bind mount) に置く。以降は refresh_token rotation を自動で回し、新 token を
+state ファイルに書き戻す。
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
 import tempfile
 import uuid
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from mcp.client.auth import OAuthClientProvider, TokenStorage
+from mcp.client.session import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 from mcp.server.fastmcp import FastMCP
+from mcp.shared.auth import (
+    OAuthClientInformationFull,
+    OAuthClientMetadata,
+    OAuthToken,
+)
 from mcp.types import ImageContent, TextContent
 
 
@@ -32,11 +47,14 @@ def _require_env(key: str) -> str:
 mcp = FastMCP("openai-image")
 
 _HERMES_URL = _require_env("HERMES_MCP_URL")
-_HERMES_BEARER = _require_env("HERMES_BEARER_TOKEN")
+_OAUTH_STATE_PATH = Path(
+    os.environ.get("HERMES_OAUTH_STATE_PATH", "/var/lib/hermes-oauth/state.json")
+)
 _TMPDIR = os.environ.get("TMPDIR", "/var/lib/openai-image-tmp")
 
-# imgen.x.ai 配下のみ image download を許可。Hermes 経由とはいえ URL は外部入力で、
-# Docker 内部ネットワーク (image-hub-app 等) や file:// 系の SSRF を防ぐ。
+# imgen.x.ai 配下のみ image download を許可。url は外部入力 (Hermes 経由とはいえ
+# 上流 server を信用しすぎない) なので、 Docker 内部ネットワークや file:// 系への
+# 飛び方を SSRF guard で阻止する。
 _ALLOWED_IMAGE_HOST_SUFFIX = ".x.ai"
 
 _EXT_BY_MIME = {
@@ -45,6 +63,83 @@ _EXT_BY_MIME = {
     "image/jpg": ".jpg",
     "image/webp": ".webp",
 }
+
+
+class FileTokenStorage(TokenStorage):
+    """OAuthClientProvider 用の永続ストレージ.
+
+    refresh_token rotation 後の新 token を atomic write (.tmp → rename) で
+    書き戻し、 ファイルパーミッションは 0o600 に保つ (bind mount 経由でホストに
+    出るため)。 client_info (DCR の結果) と tokens (access/refresh) を同一
+    JSON にまとめて保管する。
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._lock = asyncio.Lock()
+
+    async def _read(self) -> dict[str, Any]:
+        if not self._path.exists():
+            return {}
+        return json.loads(self._path.read_text())
+
+    async def _write(self, data: dict[str, Any]) -> None:
+        async with self._lock:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2))
+            os.chmod(tmp, 0o600)
+            tmp.replace(self._path)
+
+    async def get_tokens(self) -> OAuthToken | None:
+        data = await self._read()
+        raw = data.get("tokens")
+        return OAuthToken.model_validate(raw) if raw else None
+
+    async def set_tokens(self, tokens: OAuthToken) -> None:
+        data = await self._read()
+        data["tokens"] = tokens.model_dump(mode="json")
+        await self._write(data)
+
+    async def get_client_info(self) -> OAuthClientInformationFull | None:
+        data = await self._read()
+        raw = data.get("client_info")
+        return OAuthClientInformationFull.model_validate(raw) if raw else None
+
+    async def set_client_info(self, info: OAuthClientInformationFull) -> None:
+        data = await self._read()
+        data["client_info"] = info.model_dump(mode="json")
+        await self._write(data)
+
+
+async def _refuse_redirect(_url: str) -> None:
+    raise RuntimeError(
+        f"FATAL: Hermes OAuth bootstrap required. "
+        f"Run bootstrap_oauth.py on a host with a browser, then copy the "
+        f"resulting state file to {_OAUTH_STATE_PATH}."
+    )
+
+
+async def _refuse_callback() -> tuple[str, str | None]:
+    raise RuntimeError(
+        "FATAL: Hermes OAuth callback fired in server mode — "
+        "this only happens during bootstrap, never at runtime"
+    )
+
+
+def _make_auth_provider() -> OAuthClientProvider:
+    return OAuthClientProvider(
+        server_url=_HERMES_URL,
+        client_metadata=OAuthClientMetadata(
+            redirect_uris=["http://localhost:9999/callback"],
+            client_name="image-hub-openai-image",
+            grant_types=["authorization_code", "refresh_token"],
+            response_types=["code"],
+        ),
+        storage=FileTokenStorage(_OAUTH_STATE_PATH),
+        redirect_handler=_refuse_redirect,
+        callback_handler=_refuse_callback,
+    )
 
 
 def _validate_image_url(url: str) -> None:
@@ -60,65 +155,18 @@ def _validate_image_url(url: str) -> None:
         )
 
 
-async def _call_hermes_generate_image(
-    prompt: str,
-    aspect_ratio: str,
-    resolution: str,
-    quality: bool,
-) -> dict[str, Any]:
-    # 各 tool call は独立した AsyncClient → 独立した接続なので、SSE stream 間の
-    # id 衝突は発生しない。固定 1 で十分。
-    rpc_id = 1
-    payload = {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "method": "tools/call",
-        "params": {
-            "name": "generate_image",
-            "arguments": {
-                "prompt": prompt,
-                "aspect_ratio": aspect_ratio,
-                "resolution": resolution,
-                "quality": quality,
-            },
-        },
-    }
-    headers = {
-        "Authorization": f"Bearer {_HERMES_BEARER}",
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
-    }
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        resp = await client.post(_HERMES_URL, json=payload, headers=headers)
-        resp.raise_for_status()
-        ctype = resp.headers.get("content-type", "")
-        body = resp.text
-    if "text/event-stream" in ctype:
-        for block in body.split("\n\n"):
-            data_lines = [
-                line[5:].lstrip() for line in block.splitlines() if line.startswith("data:")
-            ]
-            if not data_lines:
-                continue
-            try:
-                envelope = json.loads("\n".join(data_lines))
-            except json.JSONDecodeError:
-                continue
-            if envelope.get("id") == rpc_id:
-                return envelope
-        raise RuntimeError("hermes: no matching JSON-RPC response in SSE stream")
-    return json.loads(body)
-
-
-def _extract_image_payload(envelope: dict[str, Any]) -> dict[str, Any]:
-    if "error" in envelope:
-        raise RuntimeError(f"hermes JSON-RPC error: {envelope['error']}")
-    result = envelope.get("result") or {}
-    for item in result.get("content") or []:
-        if item.get("type") != "text":
+def _extract_image_payload(content: list[Any]) -> dict[str, Any]:
+    for item in content:
+        # CallToolResult.content は MCP SDK が typed (TextContent / ImageContent etc.)
+        # にデシリアライズして渡してくる。
+        item_type = getattr(item, "type", None)
+        if item_type != "text":
+            continue
+        text = getattr(item, "text", None)
+        if not text:
             continue
         try:
-            obj = json.loads(item.get("text") or "")
+            obj = json.loads(text)
         except (json.JSONDecodeError, TypeError):
             continue
         if not isinstance(obj, dict):
@@ -127,7 +175,31 @@ def _extract_image_payload(envelope: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError(f"hermes generate_image error: {obj['error']}")
         if "url" in obj:
             return obj
-    raise RuntimeError(f"hermes: response shape unexpected: {result!r}")
+    raise RuntimeError("hermes: response shape unexpected (no text content with url)")
+
+
+async def _call_hermes_generate_image(
+    prompt: str,
+    aspect_ratio: str,
+    resolution: str,
+    quality: bool,
+) -> dict[str, Any]:
+    auth = _make_auth_provider()
+    async with streamablehttp_client(_HERMES_URL, auth=auth) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(
+                "generate_image",
+                {
+                    "prompt": prompt,
+                    "aspect_ratio": aspect_ratio,
+                    "resolution": resolution,
+                    "quality": quality,
+                },
+            )
+    if result.isError:
+        raise RuntimeError(f"hermes generate_image isError: {result.content!r}")
+    return _extract_image_payload(result.content)
 
 
 @mcp.tool()
@@ -169,8 +241,7 @@ async def generate_image(
         - Max output resolution: 2k.
         - Photorealistic faces of real living people may be refused.
     """
-    envelope = await _call_hermes_generate_image(prompt, aspect_ratio, resolution, quality)
-    payload = _extract_image_payload(envelope)
+    payload = await _call_hermes_generate_image(prompt, aspect_ratio, resolution, quality)
     url = payload["url"]
     mime = payload.get("mime_type") or "image/jpeg"
     ext = _EXT_BY_MIME.get(mime)

@@ -2,6 +2,10 @@
 *.env
 !.env.example
 storage/
+# bootstrap_oauth.py が生成する OAuth state (access/refresh token + DCR client_info)。
+# 絶対に commit しない。 prod に scp で転送して bind mount で使う。
+hermes_oauth_state*.json
+hermes_oauth/
 *.db
 *.db-journal
 *.db-wal

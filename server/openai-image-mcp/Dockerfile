@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir 'mcp[cli]>=1.19.0' 'httpx>=0.27'
 RUN npm install -g mcp-proxy
 
 COPY server.py /opt/xai-image-mcp/server.py
+COPY keepalive.py /opt/xai-image-mcp/keepalive.py
 
 ENV PYTHONUNBUFFERED=1
 ENV MCP_PROXY_PORT=8001

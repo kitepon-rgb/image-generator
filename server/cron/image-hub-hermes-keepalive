@@ -1,0 +1,25 @@
+# /etc/cron.d/image-hub-hermes-keepalive
+#
+# 週 1 で Hermes OAuth refresh_token rotation を踏ませ、 30 日アイドル TTL で
+# refresh_token が完全失効するのを防ぐ。 image-hub の openai-image を全く使わない
+# 週があっても、 このピングで rotation が走って refresh_token TTL が更新される。
+#
+# 実体は openai-image-mcp コンテナ内 /opt/xai-image-mcp/keepalive.py — Hermes に
+# tools/list を 1 回だけ叩いて即終了する。 quota 消費なし、 数秒で完走。
+#
+# Install:
+#   sudo cp server/cron/image-hub-hermes-keepalive /etc/cron.d/
+#   sudo chown root:root /etc/cron.d/image-hub-hermes-keepalive
+#   sudo chmod 644 /etc/cron.d/image-hub-hermes-keepalive
+#
+# Verify:
+#   sudo systemctl status cron     # cron daemon が動いていること
+#   docker exec image-hub-openai-image python /opt/xai-image-mcp/keepalive.py   # 手動 dry-run
+#   journalctl -t hermes-keepalive --since "8 days ago"                          # 直近の実行ログ
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+
+# 日曜 04:00 (= week 1 回、 30 日 TTL に対し 4 倍の安全マージン)
+0 4 * * 0 kite docker exec image-hub-openai-image python /opt/xai-image-mcp/keepalive.py 2>&1 | logger -t hermes-keepalive

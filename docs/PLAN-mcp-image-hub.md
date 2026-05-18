@@ -326,6 +326,7 @@ Phase 2.A / 3-2 までは `openai-image` ルートが OpenAI Platform に直課�
 - [x] e2e 検証 (2026-05-18): `tools/call generate_image` → `https://image-hub.kitepon.dynv6.net/files/<sha12>.jpg` 配信まで成功
 - [x] NAT hairpin 回避: `hermes.kitepon.dynv6.net` を public DNS で引くと自分の WAN IP に解決 → 接続 timeout。 compose.yml の `extra_hosts: ["hermes.kitepon.dynv6.net:192.168.1.2"]` で LAN 直結に切り替えて解決
 - [x] **refresh_token 30 日 TTL アイドル失効の自動回避**: prod に [server/cron/image-hub-hermes-keepalive](../server/cron/image-hub-hermes-keepalive) を `/etc/cron.d/` に設置済。 毎週日曜 04:00 に [server/openai-image-mcp/keepalive.py](../server/openai-image-mcp/keepalive.py) (Hermes に tools/list を 1 発投げるだけ、 quota 消費なし) を `docker exec` 経由で叩いて rotation を踏ませる。 「3 ヶ月使わなくて 401 → 再 bootstrap」ケースを根絶
+- [x] **structuredContent leak fix** (commit `e727a8b`): fastmcp 系上流は tools/call レスポンスで content[] と structuredContent.result[] に同じテキストを mirror するため、 後者にも container 内 path (`/var/lib/openai-image-tmp/...`) が漏れていた。 [server/image-hub-app/src/intercept.ts](../server/image-hub-app/src/intercept.ts) の `rewriteSseEventBlock` を両フィールド対応に拡張、 検証で `grep -c /var/lib/openai-image-tmp = 0` 確認
 - [ ] HermesAgent サブドメイン (`hermes.kitepon.dynv6.net`) と Hermes プロセス自体の安定運用継続観察。Hermes が落ちると image-hub の openai-image ルートも 5xx
 - [ ] OAuth state ファイル (`/home/kite/image-hub/hermes_oauth/state.json`) のバックアップ運用。失うと re-bootstrap が必要 (= ブラウザ consent をもう 1 回回す)
 - [ ] 旧 OpenAI 鍵 (`image-hub` project key) の最終 unbind 確認 (OpenAI Platform 管理画面で revoke)

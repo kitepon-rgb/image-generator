@@ -95,11 +95,26 @@ function reEncodeSseEvent(ev: SseEvent): string {
   return lines.join('\n') + '\n\n';
 }
 
+interface ContentItem {
+  type: string;
+  text?: string;
+  data?: string;
+  mimeType?: string;
+  [k: string]: unknown;
+}
+
 interface ToolCallEnvelope {
   jsonrpc?: string;
   id?: number | string;
   result?: {
-    content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+    content?: ContentItem[];
+    // 一部の上流 (fastmcp 等) は content[] と並べて structuredContent.result[] にも
+    // 同じデータを mirror して返す。 content[] だけ rewrite すると SC 側に container
+    // 内絶対パスが漏れたままになるので、 両方を同じ規則で処理する。
+    structuredContent?: {
+      result?: ContentItem[];
+      [k: string]: unknown;
+    };
     [k: string]: unknown;
   };
   error?: unknown;
@@ -151,21 +166,29 @@ function rewriteSseEventBlock(block: string, rule: RewriteRule, deps: InterceptD
   } catch {
     return { out: reEncodeSseEvent(ev), rewrites: 0 };
   }
-  const content = parsed.result?.content;
-  if (!Array.isArray(content)) {
+  const result = parsed.result;
+  if (result === undefined || result === null) {
     return { out: reEncodeSseEvent(ev), rewrites: 0 };
   }
   let total = 0;
   let touched = false;
-  for (const item of content) {
-    if (item.type === 'text' && typeof item.text === 'string') {
-      const r = rewriteText(item.text, rule, deps);
-      if (r.rewrites > 0) {
-        item.text = r.text;
-        touched = true;
-        total += r.rewrites;
+  const processArray = (arr: ContentItem[]): void => {
+    for (const item of arr) {
+      if (item.type === 'text' && typeof item.text === 'string') {
+        const r = rewriteText(item.text, rule, deps);
+        if (r.rewrites > 0) {
+          item.text = r.text;
+          touched = true;
+          total += r.rewrites;
+        }
       }
     }
+  };
+  if (Array.isArray(result.content)) {
+    processArray(result.content);
+  }
+  if (Array.isArray(result.structuredContent?.result)) {
+    processArray(result.structuredContent.result);
   }
   return {
     out: touched ? reEncodeSseEvent({ ...ev, data: JSON.stringify(parsed) }) : reEncodeSseEvent(ev),

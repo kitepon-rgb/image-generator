@@ -233,7 +233,7 @@ MCP レスポンス JSON: `{ "id": "abc123", "url": "https://image-hub.kitepon.d
 
 - **MCP 設定先**: `~/.claude/settings.json` は `mcpServers` を受け付けない。`~/.claude.json` か `.mcp.json` 経由 (caveat: `settings-mcpservers-rejected`)
 - **claude-spotter の Windows MCP 収集**: 1.2.2 以上でないと `mcp__mermaid__*` / `mcp__openai-image__*` の収集に失敗
-- **OPENAI_API_KEY 露出**: 旧鍵が本チャットで露出済み、Phase 3-2 で必ず再発行
+- **OPENAI_API_KEY 露出**: 旧鍵が本チャットで露出済み → Phase 3-2 で再発行済 ✅ → さらに 2026-05-18 の §7 切替で OpenAI 経路自体を廃止、新鍵も unbind 済
 - **kitepon.dynv6.net 直下のパス禁止**: 新規 HTTP MCP は必ず独立サブドメイン (本計画書は `image-hub.kitepon.dynv6.net`)。直下のパスは ConnectX2C に吸い込まれる (memory: `feedback_subdomain_per_mcp`)
 - **デフォルト互換性**: 層 II/III 実装時に既存ツールの引数を変更しない。新引数は必ず optional、新機能は必ず別 MCP
 - **キャッシュ default 方向**: 画像生成は非決定性が前提なので default OFF + `use_cache=true` 明示時のみ hit (default ON にすると「もう一枚」で古い画像が返る混乱モード)
@@ -292,3 +292,40 @@ image-hub.kitepon.dynv6.net {
 ```
 
 (Phase 2.A 着手時に内部ポート割り当てとマウント元 Caddyfile の真の場所を確定)
+
+## 7. 2026-05-18 更新: HermesAgent 上流への切替
+
+### 背景
+
+Phase 2.A / 3-2 までは `openai-image` ルートが OpenAI Platform に直課金される構成だった。Phase 3-2 で発行した新鍵 (`image-hub`) も §3.7 のクレジットガード前提の運用が続いていた。2026-05-18 に並行プロジェクト [HermesAgent](https://github.com/kitepon-rgb/HermesAgent) (X / Grok Imagine の OAuth セッション借用で `generate_image` を MCP 公開) が動いていることが確定したため、image-hub の `openai-image` 経路をその上流に差し替えた。
+
+### 何が変わったか
+
+| 領域 | Before | After |
+|---|---|---|
+| `openai-image-mcp` コンテナの中身 | `kazyam53/openai_gen_image_mcp` (Python、uv tool install) | 自前 [server.py](../server/openai-image-mcp/server.py) (fastmcp ラッパ、 HermesAgent MCP に JSON-RPC で `tools/call generate_image` を投げる) |
+| `OPENAI_API_KEY` | `.env` 必須 | 廃止 (.env.example からも削除) |
+| 新環境変数 | — | `HERMES_MCP_URL` / `HERMES_BEARER_TOKEN` |
+| 課金経路 | OpenAI Platform (prepaid + クレジットガード) | HermesAgent 側の SuperGrok / Premium Plus OAuth セッション (実質ゼロ) |
+| `sitecustomize.py` monkey-patch | あり (Python `tempfile.mkdtemp` の 0o700 を 0o755 に補正) | server.py 内で `os.chmod(sub, 0o755)` を明示呼び出し、ファイル削除 |
+| 互換維持の範囲 | — | service 名 `openai-image-mcp` / volume 名 `openai-image-tmp` / 出力 path 形式 `/var/lib/openai-image-tmp/openai_gen_image_*/generated_*.{png,jpg,webp}` / image-hub-app の REWRITE_RULES key `openai-image` / クライアントの `~/.claude.json` URL `/mcp/openai-image` — すべて温存 |
+
+### 影響範囲
+
+| Area | 影響 |
+|---|---|
+| image-hub-app | **無変更**。intercept.ts の path pattern も REWRITE_RULES key もそのまま。 |
+| 他クライアント (Windows / WSL2 / 他 PC の `~/.claude.json`) | **無変更**。URL も tool 名 (`mcp__openai-image__generate_image`) もそのまま。 |
+| Tool schema | **変更あり**。旧 OpenAI 引数 (`size`, `n`, `quality(str)` 等) から HermesAgent 互換 (`prompt`, `aspect_ratio`, `resolution`, `quality(bool)`) に変わった。古い呼び出しコードがあれば見直す。 |
+| §3.7 暴走課金ガード (Day-1 OpenAI クレジット制限) | **役割終了**。OpenAI 経路が無くなったので Phase 2.A の Day-1 ガードは適用対象なし。HermesAgent 側の quota (SuperGrok 上限) が新しい防衛ライン。 |
+| §3.5 生成物の返し方 (`{id, url, mime, schema_version}` 形式) | **無変更**。image-hub-app の `/files/<id>` 配信経路は引き続き上流のレスポンスを intercept で書き換える。 |
+
+### 残作業 (運用)
+
+- [ ] HermesAgent 側のサブドメイン公開設定 (`hermes.kitepon.dynv6.net` 等) と静的 bearer (`HERMES_BEARER_TOKEN` 相当) が安定運用に乗っていることを継続観察。Hermes 側が落ちると image-hub の openai-image ルートも 5xx になる。
+- [ ] 旧 OpenAI 鍵 (`image-hub` project key) の最終 unbind 確認 (OpenAI Platform 管理画面で revoke)。
+- [ ] 新スキーマで失敗するクライアント呼び出しが残っていないか、初回数回の呼び出しログで確認。
+
+### tool docstring の方針 (2026-05-18 確定)
+
+[server.py](../server/openai-image-mcp/server.py) の `generate_image` docstring は **比較表現を排除し、絶対指標 (USE FOR / DON'T USE FOR / Args / Returns / Limits) のみで記述する**。理由は memory `feedback_tool_docstring_no_comparison` に固定済。MCP `tools/list` 経由で全クライアントに伝播するため、ローカル特殊事情ではなくグローバルに正しい表現を維持する責務がある。

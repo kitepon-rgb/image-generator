@@ -5,6 +5,8 @@
 > Phase 2.A 完了 (2026-05-03)。3 MCP すべて Connected + e2e テスト成功。
 > 計画書は `../docs/PLAN-mcp-image-hub.md`、Phase 0 調査結果は `../docs/PHASE0-findings.md`、クライアント切替手順は `../docs/PHASE2A-client-cutover.md`。
 
+**2026-05-18 更新**: `openai-image-mcp` の中身を `kazyam53/openai_gen_image_mcp` から自前の HermesAgent ラッパに差し替え、 OpenAI 課金経路を切り離した。詳細は [`../docs/PLAN-mcp-image-hub.md` §7](../docs/PLAN-mcp-image-hub.md)。 service 名 / volume 名 / 出力 path 形式 / `~/.claude.json` URL は互換維持、 tool schema は HermesAgent 互換 (`prompt` / `aspect_ratio` / `resolution` / `quality(bool)`) に変更。新環境変数: `HERMES_MCP_URL` / `HERMES_BEARER_TOKEN` (旧 `OPENAI_API_KEY` は削除)。
+
 ## 構成
 
 - `image-hub-app/` — Express ベースの本体: OAuth 2.1 認可サーバー + 3 MCP への HTTP proxy + `/files/{id}` 配信。proxy は `node:fetch` 直叩き (http-proxy-middleware は v3 + Express 5 で silent fail を起こすので使わない)
@@ -190,5 +192,5 @@ rsync -a --exclude '.env*' /home/kite/image-hub/storage/ /backup/image-hub-stora
 ## 関連 caveat
 
 - `kitepon.dynv6.net` 直下のパスベース MCP 並列は禁止 (memory: `feedback_subdomain_per_mcp`)
-- `OPENAI_API_KEY` 平文露出が現行 Windows `~/.claude.json` にあり、Phase 3-2 で再発行必須
+- `OPENAI_API_KEY` 平文露出が旧 Windows `~/.claude.json` にあり → Phase 3-2 で再発行済 → 2026-05-18 の HermesAgent 切替で OpenAI 経路自体を廃止、新鍵も unbind 済
 - Mermaid CLI の Chromium 依存は別コンテナ + healthcheck で隔離 (compose.yml で対応済み)

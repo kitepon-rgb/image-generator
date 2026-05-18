@@ -1,24 +1,27 @@
-# openai-gen-image-mcp を mcp-proxy で stdio→HTTP 化
-# upstream: https://github.com/kazyam53/openai_gen_image_mcp (Phase 0-1 で確定)
+# openai-image-mcp service (HermesAgent / X Grok Imagine 経由で画像生成する MCP)
+#
+# upstream は server.py 内で HERMES_MCP_URL に JSON-RPC で tools/call generate_image
+# を投げる薄いラッパ。返ってきた imgen.x.ai の URL から画像を DL し、
+# /var/lib/openai-image-tmp/openai_gen_image_*/generated_*.{png,jpg,webp} に保存する。
+# image-hub-app の intercept.ts がそのパスを検知して /files/<id> に昇格。
+#
+# service 名と volume 名 (openai-image / openai-image-tmp) は intercept.ts の
+# REWRITE_RULES key と path pattern に紐付いているので互換維持のため変更しない。
 
-FROM python:3.13-slim AS base
+FROM python:3.13-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git && rm -rf /var/lib/apt/lists/*
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:${PATH}"
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN uv tool install git+https://github.com/kazyam53/openai_gen_image_mcp.git
+RUN pip install --no-cache-dir 'mcp[cli]>=1.19.0' 'httpx>=0.27'
 RUN npm install -g mcp-proxy
 
-# sitecustomize.py で tempfile.mkdtemp の mode を 0o755 に補正
-# (image-hub-app コンテナ uid 1000 から ro 参照するため、root 0o700 だと EACCES)
-COPY sitecustomize.py /opt/sitecustomize/sitecustomize.py
-ENV PYTHONPATH=/opt/sitecustomize
+COPY server.py /opt/xai-image-mcp/server.py
 
+ENV PYTHONUNBUFFERED=1
 ENV MCP_PROXY_PORT=8001
 EXPOSE 8001
-CMD ["sh", "-c", "mcp-proxy --port ${MCP_PROXY_PORT} --host 0.0.0.0 -- /root/.local/bin/openai-gen-image-mcp"]
+CMD ["sh", "-c", "mcp-proxy --port ${MCP_PROXY_PORT} --host 0.0.0.0 -- python /opt/xai-image-mcp/server.py"]

@@ -46,15 +46,15 @@ Server-side (one host, Docker Compose):
 - 3 stdio MCP servers wrapped via [`mcp-proxy`](https://www.npmjs.com/package/mcp-proxy) into HTTP containers
 - Caddy out front for TLS
 
-Result: install Claude Code on a new laptop → paste 3 URLs → run OAuth flow once → all three image/diagram MCPs work. The `OPENAI_API_KEY` lives only on the server.
+Result: install Claude Code on a new laptop → paste 3 URLs → run OAuth flow once → all three image/diagram MCPs work. Upstream credentials live only on the server.
 
 ## Why not just use stdio MCPs everywhere?
 
 | Concern | Per-machine stdio | This project (HTTP hub) |
 |---|---|---|
-| `OPENAI_API_KEY` location | Every laptop | One server `.env` only |
+| Upstream credential location | Every laptop | One server `.env` only |
 | Onboard a new machine | Reinstall 3 stdio packages, re-paste keys, re-distribute Chromium | Paste 3 URLs, run OAuth once |
-| Key rotation | Update every laptop simultaneously | Change `.env` on the server |
+| Credential rotation | Update every laptop simultaneously | Change `.env` on the server |
 | Mobile / SSH / remote | Painful (no Chromium, no Node) | Just `Claude Code` + the URLs |
 | Total stdio processes spawned per machine | 3 (always running, even idle) | 0 (HTTP, on-demand) |
 
@@ -77,7 +77,7 @@ flowchart LR
     caddy -->|reverse_proxy| hub
     subgraph host["Docker Compose host"]
         hub[image-hub-app<br/>OAuth 2.1 server +<br/>fetch-based reverse proxy]
-        hub --> oai["openai-image-mcp<br/>(mcp-proxy + uv tool)"]
+        hub --> oai["openai-image-mcp<br/>(mcp-proxy + upstream wrapper)"]
         hub --> exc["excalidraw-mcp<br/>(mcp-proxy + npm)"]
         hub --> mer["mermaid-mcp<br/>(mcp-proxy + claude-mermaid)"]
     end
@@ -100,7 +100,8 @@ cp .env.example .env
 #   IMAGEHUB_PUBLIC_AUTH_URL=https://image-hub.example.com
 #   IMAGEHUB_OAUTH_SIGNING_KEY=$(openssl rand -base64 64)
 #   IMAGEHUB_ADMIN_PASSCODE=$(openssl rand -base64 18)
-#   OPENAI_API_KEY=sk-proj-...
+#   HERMES_MCP_URL=<your upstream MCP endpoint for openai-image>
+#   HERMES_BEARER_TOKEN=<static bearer for that upstream>
 
 cat caddy/image-hub.snippet >> /path/to/your/Caddyfile
 docker compose up -d --build
@@ -141,7 +142,7 @@ Plus an OAuth gotcha: don't fire two OAuth flows for the **same** MCP server sim
 │   └── PHASE2A-client-cutover.md   # Client setup guide
 └── server/
     ├── image-hub-app/              # Express OAuth + reverse proxy
-    ├── openai-image-mcp/           # mcp-proxy + openai-gen-image-mcp
+    ├── openai-image-mcp/           # mcp-proxy + thin Python wrapper (proxies to HermesAgent upstream)
     ├── excalidraw-mcp/             # mcp-proxy + mcp-excalidraw-server
     ├── mermaid-mcp/                # mcp-proxy + claude-mermaid (with chromium fix)
     ├── caddy/image-hub.snippet     # Reverse proxy host block
@@ -153,6 +154,7 @@ Plus an OAuth gotcha: don't fire two OAuth flows for the **same** MCP server sim
 
 - **Phase 2.A** (deploy + aggregate): complete
 - **Phase 3-2** (key rotation): complete
+- **Phase 3-X** (openai-image upstream cutover to HermesAgent, 2026-05-18): complete — see [docs/PLAN-mcp-image-hub.md §7](docs/PLAN-mcp-image-hub.md)
 - **Week-2 guards** (per-client rate limit, budget alerts): in progress
 - **Phase 2.B** (`/gallery`, `/dashboard`, content-hash cache): planned
 - **Phase 4** (pipeline MCP, image→prompt vision MCP, fal.ai layer): planned
@@ -162,7 +164,7 @@ See [docs/PLAN-mcp-image-hub.md §2](docs/PLAN-mcp-image-hub.md) for the full ch
 <details>
 <summary>Why this repo exists (origin story)</summary>
 
-The author was running 3 image-related stdio MCPs on Windows — `openai-image`, `excalidraw`, `mermaid` — and wanted them available from WSL2, SSH sessions, mobile, and friends' machines without copying the OpenAI key (and the Chromium dependency for mermaid) to every device.
+The author was running 3 image-related stdio MCPs on Windows — `openai-image`, `excalidraw`, `mermaid` — and wanted them available from WSL2, SSH sessions, mobile, and friends' machines without copying upstream credentials (and the Chromium dependency for mermaid) to every device.
 
 A few searches turned up no off-the-shelf "MCP gateway with OAuth + reverse proxy + per-server transport translation" project, so this is one. The OAuth implementation pattern is borrowed from a sibling Relay-MCP project; the rest is fresh.
 
@@ -172,7 +174,7 @@ A few searches turned up no off-the-shelf "MCP gateway with OAuth + reverse prox
 
 - [`mcp-proxy`](https://github.com/punkpeye/mcp-proxy) — the stdio→HTTP wrapping that makes any of this possible
 - [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol) — OAuth 2.1 server primitives
-- [`claude-mermaid`](https://github.com/veelenga/claude-mermaid), [`mcp-excalidraw-server`](https://github.com/yctimlin/mcp_excalidraw), [`openai_gen_image_mcp`](https://github.com/kazyam53/openai_gen_image_mcp) — the upstream stdio MCPs being aggregated
+- [`claude-mermaid`](https://github.com/veelenga/claude-mermaid), [`mcp-excalidraw-server`](https://github.com/yctimlin/mcp_excalidraw) — the upstream stdio MCPs being aggregated
 
 ## License
 

@@ -46,15 +46,15 @@ After (このプロジェクト):
 - 3 本の stdio MCP を [`mcp-proxy`](https://www.npmjs.com/package/mcp-proxy) で HTTP 化したコンテナ
 - 前段に Caddy (TLS)
 
-結果: 新しいマシンに Claude Code を入れる → URL 3 行貼る → 1 度 OAuth する → 3 つとも動く。`OPENAI_API_KEY` はサーバーだけ。
+結果: 新しいマシンに Claude Code を入れる → URL 3 行貼る → 1 度 OAuth する → 3 つとも動く。上流認証情報はサーバーだけに置く。
 
 ## なぜ stdio MCP のままじゃダメなのか
 
 | 観点 | マシンごと stdio | このプロジェクト (HTTP ハブ) |
 |---|---|---|
-| `OPENAI_API_KEY` の置き場所 | 全マシン | サーバー `.env` のみ |
+| 上流認証情報の置き場所 | 全マシン | サーバー `.env` のみ |
 | 新しいマシンを追加 | stdio パッケージ 3 本再インストール、鍵を貼り直す、Chromium も再配布 | URL 3 行貼って OAuth 1 回 |
-| 鍵ローテ | 全マシン同時に更新 | サーバー `.env` 1 か所差し替え |
+| 認証情報ローテ | 全マシン同時に更新 | サーバー `.env` 1 か所差し替え |
 | モバイル / SSH / 出先 | 痛い (Chromium も Node もない) | `Claude Code` と URL だけ |
 | マシンあたり常駐 stdio プロセス数 | 3 (アイドルでも常駐) | 0 (HTTP、必要時のみ) |
 
@@ -77,7 +77,7 @@ flowchart LR
     caddy -->|reverse_proxy| hub
     subgraph host["Docker Compose ホスト"]
         hub[image-hub-app<br/>OAuth 2.1 +<br/>fetch ベース proxy]
-        hub --> oai["openai-image-mcp<br/>(mcp-proxy + uv tool)"]
+        hub --> oai["openai-image-mcp<br/>(mcp-proxy + 上流ラッパ)"]
         hub --> exc["excalidraw-mcp<br/>(mcp-proxy + npm)"]
         hub --> mer["mermaid-mcp<br/>(mcp-proxy + claude-mermaid)"]
     end
@@ -100,7 +100,8 @@ cp .env.example .env
 #   IMAGEHUB_PUBLIC_AUTH_URL=https://image-hub.example.com
 #   IMAGEHUB_OAUTH_SIGNING_KEY=$(openssl rand -base64 64)
 #   IMAGEHUB_ADMIN_PASSCODE=$(openssl rand -base64 18)
-#   OPENAI_API_KEY=sk-proj-...
+#   HERMES_MCP_URL=<openai-image の上流 MCP エンドポイント>
+#   HERMES_BEARER_TOKEN=<その上流の静的 bearer>
 
 cat caddy/image-hub.snippet >> /path/to/your/Caddyfile
 docker compose up -d --build
@@ -139,7 +140,7 @@ OAuth 注意: **同一 MCP サーバー** に対して 2 つのフロー (例: V
 │   └── PHASE2A-client-cutover.md   # クライアント切替手順
 └── server/
     ├── image-hub-app/              # Express OAuth + reverse proxy
-    ├── openai-image-mcp/           # mcp-proxy + openai-gen-image-mcp
+    ├── openai-image-mcp/           # mcp-proxy + 自前 Python ラッパ (HermesAgent 上流に proxy)
     ├── excalidraw-mcp/             # mcp-proxy + mcp-excalidraw-server
     ├── mermaid-mcp/                # mcp-proxy + claude-mermaid (chromium 修正込み)
     ├── caddy/image-hub.snippet     # リバプロホストブロック
@@ -151,6 +152,7 @@ OAuth 注意: **同一 MCP サーバー** に対して 2 つのフロー (例: V
 
 - **Phase 2.A** (デプロイ + 集約): 完了
 - **Phase 3-2** (鍵ローテ): 完了
+- **Phase 3-X** (openai-image 上流を HermesAgent に切替、2026-05-18): 完了 — [docs/PLAN-mcp-image-hub.md §7](docs/PLAN-mcp-image-hub.md) 参照
 - **Week-2 ガード** (クライアント別レート制限、予算アラート): 進行中
 - **Phase 2.B** (`/gallery`、`/dashboard`、content-hash キャッシュ): 計画
 - **Phase 4** (パイプライン MCP、画像→プロンプト vision MCP、fal.ai 層): 計画
@@ -161,7 +163,7 @@ OAuth 注意: **同一 MCP サーバー** に対して 2 つのフロー (例: V
 
 - [`mcp-proxy`](https://github.com/punkpeye/mcp-proxy) — stdio→HTTP の核
 - [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol) — OAuth 2.1 サーバープリミティブ
-- [`claude-mermaid`](https://github.com/veelenga/claude-mermaid) / [`mcp-excalidraw-server`](https://github.com/yctimlin/mcp_excalidraw) / [`openai_gen_image_mcp`](https://github.com/kazyam53/openai_gen_image_mcp) — 集約対象の上流 stdio MCP
+- [`claude-mermaid`](https://github.com/veelenga/claude-mermaid) / [`mcp-excalidraw-server`](https://github.com/yctimlin/mcp_excalidraw) — 集約対象の上流 stdio MCP
 
 ## License
 

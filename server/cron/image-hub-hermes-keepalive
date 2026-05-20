@@ -4,8 +4,9 @@
 # refresh_token が完全失効するのを防ぐ。 image-hub の openai-image を全く使わない
 # 週があっても、 このピングで rotation が走って refresh_token TTL が更新される。
 #
-# 実体は openai-image-mcp コンテナ内 /opt/xai-image-mcp/keepalive.py — Hermes に
-# tools/list を 1 回だけ叩いて即終了する。 quota 消費なし、 数秒で完走。
+# 実体は openai-image-mcp コンテナ内 /opt/xai-image-mcp/keepalive.py —
+# ensure_fresh_access_token(force=True) で refresh_token grant を 1 回踏んで即
+# 終了する。 画像生成 quota の消費なし、 数秒で完走。
 #
 # Install:
 #   sudo cp server/cron/image-hub-hermes-keepalive /etc/cron.d/

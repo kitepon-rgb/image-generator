@@ -36,6 +36,8 @@ from mcp.shared.auth import (
 )
 from mcp.types import ImageContent, TextContent
 
+from hermes_oauth import ensure_fresh_access_token
+
 
 def _require_env(key: str) -> str:
     v = os.environ.get(key)
@@ -184,6 +186,11 @@ async def _call_hermes_generate_image(
     resolution: str,
     quality: bool,
 ) -> dict[str, Any]:
+    # MCP SDK は access_token の有効期限を state ファイルから復元しないため、
+    # 期限切れトークンをそのまま投げて 401 → ブラウザ flow → _refuse_redirect で
+    # 即死する。 Hermes を叩く前に 1 時間 TTL を自前で事前更新しておく
+    # (詳細は hermes_oauth.py)。 sync 関数なのでイベントループを塞がないよう別スレッドへ。
+    await asyncio.to_thread(ensure_fresh_access_token)
     auth = _make_auth_provider()
     async with streamablehttp_client(_HERMES_URL, auth=auth) as (read, write, _):
         async with ClientSession(read, write) as session:

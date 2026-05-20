@@ -100,12 +100,13 @@ cp .env.example .env
 #   IMAGEHUB_PUBLIC_AUTH_URL=https://image-hub.example.com
 #   IMAGEHUB_OAUTH_SIGNING_KEY=$(openssl rand -base64 64)
 #   IMAGEHUB_ADMIN_PASSCODE=$(openssl rand -base64 18)
-#   HERMES_MCP_URL=<openai-image の上流 MCP エンドポイント>
-#   HERMES_BEARER_TOKEN=<その上流の静的 bearer>
+#   HERMES_MCP_URL=<openai-image の OAuth 2.1 上流 MCP エンドポイント>
 
 cat caddy/image-hub.snippet >> /path/to/your/Caddyfile
 docker compose up -d --build
 ```
+
+> `openai-image` の上流は OAuth 2.1 認証。初回利用前に一度だけブラウザ consent の bootstrap を走らせ、生成されたトークン state ファイルを配置する — 詳細は [docs/PLAN-mcp-image-hub.md §7](docs/PLAN-mcp-image-hub.md)。
 
 各 Claude Code クライアントで:
 

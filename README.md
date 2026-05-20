@@ -100,12 +100,13 @@ cp .env.example .env
 #   IMAGEHUB_PUBLIC_AUTH_URL=https://image-hub.example.com
 #   IMAGEHUB_OAUTH_SIGNING_KEY=$(openssl rand -base64 64)
 #   IMAGEHUB_ADMIN_PASSCODE=$(openssl rand -base64 18)
-#   HERMES_MCP_URL=<your upstream MCP endpoint for openai-image>
-#   HERMES_BEARER_TOKEN=<static bearer for that upstream>
+#   HERMES_MCP_URL=<your OAuth 2.1 upstream MCP endpoint for openai-image>
 
 cat caddy/image-hub.snippet >> /path/to/your/Caddyfile
 docker compose up -d --build
 ```
+
+> `openai-image`'s upstream authenticates over OAuth 2.1. Before first use, run its one-time browser-consent bootstrap and place the resulting token-state file — see [docs/PLAN-mcp-image-hub.md §7](docs/PLAN-mcp-image-hub.md).
 
 Then on each Claude Code client:
 

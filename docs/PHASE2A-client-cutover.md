@@ -22,9 +22,9 @@
 
 | MCP 名 | 公開 URL (Claude Code config に書く) | type |
 |---|---|---|
-| `openai-image` | `https://image-hub.kitepon.dynv6.net/mcp/openai-image` | `http` |
-| `excalidraw`   | `https://image-hub.kitepon.dynv6.net/mcp/excalidraw`   | `http` |
-| `mermaid`      | `https://image-hub.kitepon.dynv6.net/mcp/mermaid`      | `http` |
+| `openai-image` | `https://image-hub.kitepon.dev/mcp/openai-image` | `http` |
+| `excalidraw`   | `https://image-hub.kitepon.dev/mcp/excalidraw`   | `http` |
+| `mermaid`      | `https://image-hub.kitepon.dev/mcp/mermaid`      | `http` |
 
 > **transport は Streamable HTTP**: SSE は採用しない (リバプロ越しで `messages?sessionId=...` の relative URL が host root に飛んで 404 になる)。詳細は memory `feedback_mcp_proxy_streamable_http` 参照。
 > 接続時に Claude Code は `/.well-known/oauth-protected-resource/mcp` を辿って OAuth フロー (admin passcode) に進む。
@@ -40,15 +40,15 @@
 ```json
 "openai-image": {
   "type": "http",
-  "url": "https://image-hub.kitepon.dynv6.net/mcp/openai-image"
+  "url": "https://image-hub.kitepon.dev/mcp/openai-image"
 },
 "excalidraw": {
   "type": "http",
-  "url": "https://image-hub.kitepon.dynv6.net/mcp/excalidraw"
+  "url": "https://image-hub.kitepon.dev/mcp/excalidraw"
 },
 "mermaid": {
   "type": "http",
-  "url": "https://image-hub.kitepon.dynv6.net/mcp/mermaid"
+  "url": "https://image-hub.kitepon.dev/mcp/mermaid"
 }
 ```
 
@@ -66,9 +66,9 @@ WSL2 側にはこれら 3 MCP は登録されていないので **追加のみ**
 cp ~/.claude.json ~/.claude.json.bak-$(date +%Y%m%d)
 # jq があるなら:
 jq '.mcpServers += {
-  "openai-image": {"type":"http","url":"https://image-hub.kitepon.dynv6.net/mcp/openai-image"},
-  "excalidraw":   {"type":"http","url":"https://image-hub.kitepon.dynv6.net/mcp/excalidraw"},
-  "mermaid":      {"type":"http","url":"https://image-hub.kitepon.dynv6.net/mcp/mermaid"}
+  "openai-image": {"type":"http","url":"https://image-hub.kitepon.dev/mcp/openai-image"},
+  "excalidraw":   {"type":"http","url":"https://image-hub.kitepon.dev/mcp/excalidraw"},
+  "mermaid":      {"type":"http","url":"https://image-hub.kitepon.dev/mcp/mermaid"}
 }' ~/.claude.json > ~/.claude.json.new && mv ~/.claude.json.new ~/.claude.json
 ```
 
@@ -107,9 +107,9 @@ CLI 経由 (`mcp__<name>__authenticate` ツール) なら、URL を渡されて�
 
 ```bash
 # 1. OAuth metadata
-curl -s https://image-hub.kitepon.dynv6.net/.well-known/oauth-authorization-server | python3 -m json.tool
+curl -s https://image-hub.kitepon.dev/.well-known/oauth-authorization-server | python3 -m json.tool
 # 2. 401 challenge (Streamable HTTP エンドポイント)
-curl -i -X POST https://image-hub.kitepon.dynv6.net/mcp/excalidraw \
+curl -i -X POST https://image-hub.kitepon.dev/mcp/excalidraw \
   -H 'content-type: application/json' -d '{}' | head -5
 # 3. healthcheck pass を確認
 ssh kite@192.168.1.2 'docker ps --format "{{.Names}}\t{{.Status}}"'

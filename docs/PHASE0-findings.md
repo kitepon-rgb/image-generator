@@ -146,14 +146,14 @@
 ## 0-11 サブドメイン + TLS + クライアント到達経路
 
 **判明事実**:
-- x-api が `https://kitepon.dynv6.net/mcp` で稼働中 = サブドメインは既に確保済み (kitepon.dynv6.net + 直下 `/mcp` パス)
+- x-api が `https://kitepon.dev/mcp` で稼働中 = サブドメインは既に確保済み (kitepon.dev + 直下 `/mcp` パス)
 - TLS 取得済み (HTTPS 接続成立)
 - reverse proxy は **Caddy** (`via: 1.1 Caddy`)
 - HSTS 有効、Strict-Transport-Security: max-age=31536000
 
 **採用方針 (確定、ユーザー指定)**:
-- **`kitepon.dynv6.net` 直下のパスベース (`/mcp/openai-image` 等) は禁止**。理由: 既存の X-MCP / IP-MCP / Relay-MCP は同様にパスベースで揃えようとして失敗した実績あり (全部 ConnectX2C に吸い込まれた)。X-MCP / IP-MCP / Relay-MCP が個別サブドメインに分かれているのはこのため。
-- **独立サブドメインを必ず取る**。例: `image-hub.kitepon.dynv6.net` (実際の名前は Phase 0-11 でユーザー確定)。
+- **`kitepon.dev` 直下のパスベース (`/mcp/openai-image` 等) は禁止**。理由: 既存の X-MCP / IP-MCP / Relay-MCP は同様にパスベースで揃えようとして失敗した実績あり (全部 ConnectX2C に吸い込まれた)。X-MCP / IP-MCP / Relay-MCP が個別サブドメインに分かれているのはこのため。
+- **独立サブドメインを必ず取る**。例: `image-hub.kitepon.dev` (実際の名前は Phase 0-11 でユーザー確定)。
 - Caddy 設定にこのサブドメイン用の `host` ブロックを新規追加 + TLS 自動発行 (Caddy が dynv6 と連携している前提)。
 
 **進路への影響**: Phase 0-11 は「既存方式 (= サブドメイン分割) を踏襲」で実質クリア。ただしサブドメイン名と Caddy 設定追加手順は Phase 0-11 で確定要。
@@ -166,14 +166,14 @@
 
 **判明事実 (192.168.1.2 SSH 調査 + Caddy adapt 結果より、決定的)**:
 - 認可サーバーは **ConnectC2X** (`connect-c2x:3000` / `192.168.1.2:3001`、`/home/kite/ConnectC2X/` で稼働中、ユーザー自作)
-- Caddy 経由 `kitepon.dynv6.net` で次の OAuth 2.1 エンドポイントを公開:
+- Caddy 経由 `kitepon.dev` で次の OAuth 2.1 エンドポイントを公開:
   - `/.well-known/oauth-authorization-server` ✅ (RFC 8414 — Authorization Server Metadata)
   - `/.well-known/oauth-protected-resource` ✅ (RFC 9728 — Protected Resource Metadata)
   - `/authorize` `/token` `/register` `/revoke` ✅ (OAuth 2.1 + Dynamic Client Registration)
   - `/mcp` 本体エンドポイント
   - `/api/google-auth` `/api/authorize-ticket` `/api/x-token` `/api/subscription` `/api/user-info` 等の周辺 API
   - 環境変数: `X_BEARER_TOKEN` / `TOKEN_ENCRYPTION_KEY` / `ISSUER_URL` / `STRIPE_SECRET_KEY` / `FREE_TIER_DAILY_LIMIT` (subscription / Stripe 連携あり)
-- 既存サブドメイン MCP (`relay.kitepon.dynv6.net` / `ipmcp.kitepon.dynv6.net`) は **同じ ConnectC2X の OAuth を共有して使っている前提** (Caddy の routing から確認可能)
+- 既存サブドメイン MCP (`relay.kitepon.dev` / `ipmcp.kitepon.dev`) は **同じ ConnectC2X の OAuth を共有して使っている前提** (Caddy の routing から確認可能)
 
 **Phase 0-12 (a-0) 4 分岐評価**: → **[I] 完全準拠** (Relay-MCP のパターンを流用する前提)
 
@@ -187,12 +187,12 @@
 - Refresh token rotation + reuse detection (OAuth 2.1 §6.1) 完備
 - `WWW-Authenticate: Bearer ... resource_metadata="..."` (RFC 9728) 完備 (実機 curl で確認)
 
-**採用方針**: Relay-MCP の `auth.ts` をベース流用、audience を `https://image-hub.kitepon.dynv6.net` に差し替えて image-hub に組み込む。完全独立で ConnectC2X 非依存。MCP 2025-06-18 + RFC 8707 + RFC 9728 すべて満たす。
+**採用方針**: Relay-MCP の `auth.ts` をベース流用、audience を `https://image-hub.kitepon.dev` に差し替えて image-hub に組み込む。完全独立で ConnectC2X 非依存。MCP 2025-06-18 + RFC 8707 + RFC 9728 すべて満たす。
 
 **Phase 2.A.D-5 (OAuth gate 実装) のコスト見積**: Relay-MCP の auth.ts コピー + audience 設定差し替えで約 1 日。改修ではなくパターン流用なので低リスク。
 
 **採用方針**:
-- image-hub も ConnectC2X の OAuth を流用。`image-hub.kitepon.dynv6.net` を新規 audience として ConnectC2X に登録できれば最短。
+- image-hub も ConnectC2X の OAuth を流用。`image-hub.kitepon.dev` を新規 audience として ConnectC2X に登録できれば最短。
 - multi-audience 対応の可否はユーザー (ConnectC2X 作者) に直接確認するのが速い。
 - 参考: ConnectC2X の `/.well-known/oauth-protected-resource` を image-hub サブドメインで返せるかが Resource Server 分離モデルの鍵。
 
@@ -213,7 +213,7 @@
 - 0-8: クレジットガード設計確定 (auto-recharge OFF + 月初チャージ額制限)
 - 0-9: 進路 (c) 直接 Phase 2.A 確定
 - 0-10: 他 PC + 出先想定あり → 進路 (c) を支持
-- 0-11: `image-hub.kitepon.dynv6.net` サブドメイン取得、Caddy ホストブロック追加 (TLS 自動)
+- 0-11: `image-hub.kitepon.dev` サブドメイン取得、Caddy ホストブロック追加 (TLS 自動)
 - 0-12: Relay-MCP の自前 OAuth 2.1 (auth.ts 613 行) を流用、audience を image-hub に差し替え → MCP 2025-06-18 + RFC 8707 + RFC 9728 完全準拠
 
 ### 要ユーザー確認 (黄、残り 1 つ)

@@ -5,14 +5,12 @@
 # image-hub
 
 [![CI](https://github.com/kitepon-rgb/image-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/kitepon-rgb/image-generator/actions/workflows/ci.yml)
-[![Phase 2.A](https://img.shields.io/badge/Phase%202.A-complete-success)](docs/PLAN-mcp-image-hub.md)
-[![Transport](https://img.shields.io/badge/MCP-Streamable%20HTTP-blue)](https://modelcontextprotocol.io)
-[![OAuth 2.1](https://img.shields.io/badge/OAuth-2.1-green)](https://oauth.net/2.1/)
-[![License](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
+[![GitHub release](https://img.shields.io/github/v/release/kitepon-rgb/image-generator?color=24292e&logo=github)](https://github.com/kitepon-rgb/image-generator/releases)
+[![license](https://img.shields.io/github/license/kitepon-rgb/image-generator?color=blue)](LICENSE)
+
+[English](README.md) · **日本語**
 
 > **1 サブドメイン、画像系 MCP 3 本、OAuth 保護。** `openai-image` / `excalidraw` / `mermaid` の stdio MCP を 1 つの OAuth 2.1 保護 HTTPS エンドポイントに集約し、Windows / WSL2 / リモートの Claude Code から **クライアントに API キーを置かずに** 呼べる。
-
-[English README](README.md)
 
 ---
 

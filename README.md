@@ -5,14 +5,12 @@
 # image-hub
 
 [![CI](https://github.com/kitepon-rgb/image-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/kitepon-rgb/image-generator/actions/workflows/ci.yml)
-[![Phase 2.A](https://img.shields.io/badge/Phase%202.A-complete-success)](docs/PLAN-mcp-image-hub.md)
-[![Transport](https://img.shields.io/badge/MCP-Streamable%20HTTP-blue)](https://modelcontextprotocol.io)
-[![OAuth 2.1](https://img.shields.io/badge/OAuth-2.1-green)](https://oauth.net/2.1/)
-[![License](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
+[![GitHub release](https://img.shields.io/github/v/release/kitepon-rgb/image-generator?color=24292e&logo=github)](https://github.com/kitepon-rgb/image-generator/releases)
+[![license](https://img.shields.io/github/license/kitepon-rgb/image-generator?color=blue)](LICENSE)
+
+**English** · [日本語](README.ja.md)
 
 > **One subdomain, three image MCPs, OAuth-gated.** Aggregate `openai-image`, `excalidraw`, and `mermaid` stdio MCP servers behind a single OAuth 2.1-protected HTTPS endpoint, callable from Windows / WSL2 / remote Claude Code clients with **no API key on the client side**.
-
-[日本語版 README](README.ja.md)
 
 ---
 

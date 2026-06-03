@@ -5,20 +5,20 @@
 
 ## TL;DR
 
-- **対象 3 MCP**: `openai-image` / `excalidraw` / `mermaid` を Windows stdio から **`image-hub.kitepon.dev` サブドメイン経由の HTTP MCP** に集約。
+- **対象 3 MCP**: `openai-image` / `excalidraw` / `mermaid` を Windows stdio から **`image-hub.your-host.example.com` サブドメイン経由の HTTP MCP** に集約。
 - **進路**: (c) 直接 Phase 2.A → Phase 3 → 運用 → Phase 2.B (ハブ化) → Phase 4 (拡張、任意)。Phase 1 (WSL2 ローカル stdio 検証) は完全スキップ。
-- **OAuth**: 既存 Relay-MCP の `auth.ts` (613 行) を流用。MCP 2025-06-18 + RFC 8707 + RFC 9728 完全準拠、audience を `https://image-hub.kitepon.dev` に差し替え。
+- **OAuth**: 既存 Relay-MCP の `auth.ts` (613 行) を流用。MCP 2025-06-18 + RFC 8707 + RFC 9728 完全準拠、audience を `https://image-hub.your-host.example.com` に差し替え。
 - **絶対原則**: 既存ツールのクライアント呼び出し API (メソッド名 / 必須引数) は互換維持。レスポンス JSON は HTTP 集約で `{id, url, mime, schema_version}` 形式に変わる (§3.5)。新機能は層 I (透明) / II (optional 引数) / III (新 MCP) に隔離。
 
 ## 0. 結論先出し
 
-Windows 側に登録されている画像/作図系 MCP 3 本を 192.168.1.2 の Docker Compose 上に集約稼働させ、`image-hub.kitepon.dev` サブドメインで Windows / WSL2 / 他 PC / 出先から共有利用する。さらにギャラリー / コストダッシュボード / スタイルプリセット / パイプラインなどの付加機能を段階的に乗せる。
+Windows 側に登録されている画像/作図系 MCP 3 本を YOUR_SERVER_IP の Docker Compose 上に集約稼働させ、`image-hub.your-host.example.com` サブドメインで Windows / WSL2 / 他 PC / 出先から共有利用する。さらにギャラリー / コストダッシュボード / スタイルプリセット / パイプラインなどの付加機能を段階的に乗せる。
 
 **確定事項**:
-- サブドメインは `image-hub.kitepon.dev` (kitepon.dev 直下のパス並列は禁止 — ConnectX2C に吸い込まれる、X-MCP/IP-MCP/Relay-MCP が個別サブドメインに分かれているのと同じ理由)
+- サブドメインは `image-hub.your-host.example.com` (your-host.example.com 直下のパス並列は禁止 — ConnectX2C に吸い込まれる、X-MCP/IP-MCP/Relay-MCP が個別サブドメインに分かれているのと同じ理由)
 - 認可サーバーは Relay-MCP の自前 OAuth 2.1 実装をパターン流用
 - Reverse proxy は既存 Caddy (Docker コンテナ) にホストブロックを 1 つ追加
-- 3 MCP は Docker Compose で `/home/kite/image-hub/` 配下に並べる (relay/ip-mcp と同じ運用パターン)
+- 3 MCP は Docker Compose で `/path/to/image-hub/` 配下に並べる (relay/ip-mcp と同じ運用パターン)
 
 ## 1. 現状
 
@@ -26,28 +26,28 @@ Windows 側に登録されている画像/作図系 MCP 3 本を 192.168.1.2 の
 
 | 名前 | 形式 | 実装 |
 |---|---|---|
-| openai-image | stdio | `C:/Users/kite_/.local/bin/openai-gen-image-mcp.exe` (uv tool トランポリン、実体は GitHub `kazyam53/openai_gen_image_mcp` の Python パッケージ) + `OPENAI_API_KEY` 平文直書き |
-| excalidraw | stdio | `node C:/Users/kite_/Documents/Program/claude-image-tools/mcp_excalidraw/dist/index.js` (npm `mcp-excalidraw-server` v1.0.2、Dockerfile/docker-compose 完備) |
+| openai-image | stdio | `C:/Users/youruser/.local/bin/openai-gen-image-mcp.exe` (uv tool トランポリン、実体は GitHub `kazyam53/openai_gen_image_mcp` の Python パッケージ) + `OPENAI_API_KEY` 平文直書き |
+| excalidraw | stdio | `node C:/Users/youruser/Documents/Program/claude-image-tools/mcp_excalidraw/dist/index.js` (npm `mcp-excalidraw-server` v1.0.2、Dockerfile/docker-compose 完備) |
 | mermaid | stdio | `claude-mermaid` (npm `claude-mermaid` v1.6.2、Mermaid CLI 経由で Chromium 必要) |
 
-### 192.168.1.2 (Phase 0 で SSH 調査)
+### YOUR_SERVER_IP (Phase 0 で SSH 調査)
 
 - Ubuntu / Linux 7.0.0-14-generic / x86_64
 - スタック: Docker Compose (各サービスがホームディレクトリ下の独立 compose、Caddy も Docker コンテナ)
 - 既存 MCP 系コンテナ: `connect-c2x` (port 3001、メイン) / `relay` (18804) / `ip-mcp` (8765) / `caddy` (80/443/8443)
-- メイン Caddyfile: `/home/kite/ConnectC2X/Caddyfile` (Docker mount 経由で `/etc/caddy/Caddyfile` として動作)
+- メイン Caddyfile: `/path/to/ConnectC2X/Caddyfile` (Docker mount 経由で `/etc/caddy/Caddyfile` として動作)
 
 ### 既存サブドメインと OAuth パターン
 
-- `kitepon.dev` → ConnectC2X が OAuth 2.1 サーバー + メイン MCP (古い実装、`resource_metadata` 未対応)
-- `relay.kitepon.dev` → Relay-MCP (自前 OAuth、`resource_metadata` 完備、audience-bound JWT)
-- `ipmcp.kitepon.dev` → IP-MCP (Relay-MCP と同パターン想定)
+- `your-host.example.com` → ConnectC2X が OAuth 2.1 サーバー + メイン MCP (古い実装、`resource_metadata` 未対応)
+- `relay.your-host.example.com` → Relay-MCP (自前 OAuth、`resource_metadata` 完備、audience-bound JWT)
+- `ipmcp.your-host.example.com` → IP-MCP (Relay-MCP と同パターン想定)
 
 ## 2. 検証可能なゴール
 
 ### 2.1 移植・集約 (Phase 2.A 完了 ✅ 2026-05-03)
 
-- [x] WSL2 / Windows / 出先の Claude Code から `mcp__openai-image__*` / `mcp__excalidraw__*` / `mcp__mermaid__*` が `https://image-hub.kitepon.dev/mcp/{name}` 経由で呼べる (transport は Streamable HTTP)
+- [x] WSL2 / Windows / 出先の Claude Code から `mcp__openai-image__*` / `mcp__excalidraw__*` / `mcp__mermaid__*` が `https://image-hub.your-host.example.com/mcp/{name}` 経由で呼べる (transport は Streamable HTTP)
 - [x] OAuth 2.1 認可フローを Claude Code が完走できる (Dynamic Client Registration + audience-bound JWT)
 - [x] サーバー側に生成物ストレージ + `/files/{id}` 配信エンドポイントがあり、各 MCP のレスポンスが `{id, url, mime, schema_version}` 形式で返す
 - [x] Day-1 防御一式が動いている: OpenAI クレジットガード (auto-recharge OFF + 月初チャージ額制限 + usage limit) / 内部ポート LAN 限定 listen / TLS / OAuth gate / バックアップ最小実装
@@ -57,8 +57,8 @@ Windows 側に登録されている画像/作図系 MCP 3 本を 192.168.1.2 の
 
 ### 2.2 ハブ化 (Phase 2.B、Phase 2.A + 3 完了後しばらく運用してから着手)
 
-- [ ] `https://image-hub.kitepon.dev/gallery` でブラウザから生成物履歴一覧 (層 I)
-- [ ] `https://image-hub.kitepon.dev/dashboard` でコスト/使用量集計 (層 I)
+- [ ] `https://image-hub.your-host.example.com/gallery` でブラウザから生成物履歴一覧 (層 I)
+- [ ] `https://image-hub.your-host.example.com/dashboard` でコスト/使用量集計 (層 I)
 - [ ] content-hash キャッシュ (`use_cache=true` 指定時のみ hit、default は新規生成、層 II)
 
 ### 2.3 拡張機能 (Phase 4、必要になったら順次)
@@ -74,7 +74,7 @@ Windows 側に登録されている画像/作図系 MCP 3 本を 192.168.1.2 の
 ### 3.1 トポロジ
 
 ```
-Windows / WSL2 / 出先   ─→  https://image-hub.kitepon.dev/  (Caddy で TLS + OAuth gate)
+Windows / WSL2 / 出先   ─→  https://image-hub.your-host.example.com/  (Caddy で TLS + OAuth gate)
 Claude Code             ↓
                         ├── /mcp/openai-image    →  内部 image-hub-openai-image:PORT
                         ├── /mcp/excalidraw      →  内部 image-hub-excalidraw:PORT
@@ -91,9 +91,9 @@ Claude Code             ↓
 各クライアント側設定:
 
 ```json
-"openai-image": { "type": "http", "url": "https://image-hub.kitepon.dev/mcp/openai-image" },
-"excalidraw":   { "type": "http", "url": "https://image-hub.kitepon.dev/mcp/excalidraw" },
-"mermaid":      { "type": "http", "url": "https://image-hub.kitepon.dev/mcp/mermaid" }
+"openai-image": { "type": "http", "url": "https://image-hub.your-host.example.com/mcp/openai-image" },
+"excalidraw":   { "type": "http", "url": "https://image-hub.your-host.example.com/mcp/excalidraw" },
+"mermaid":      { "type": "http", "url": "https://image-hub.your-host.example.com/mcp/mermaid" }
 ```
 
 ### 3.2 stdio→HTTP 化の手段
@@ -104,17 +104,17 @@ Claude Code             ↓
 
 ### 3.3 認証 / TLS
 
-`x-api` の Caddy + dynv6 + Let's Encrypt 自動発行を流用。**`image-hub.kitepon.dev` の独立サブドメイン**で Caddy ホストブロックを追加。OAuth は Relay-MCP `auth.ts` パターン流用 (自前 OAuth 2.1 サーバー、JWT audience を `https://image-hub.kitepon.dev` に bind、admin passcode で consent 承認)。
+`x-api` の Caddy + dynv6 + Let's Encrypt 自動発行を流用。**`image-hub.your-host.example.com` の独立サブドメイン**で Caddy ホストブロックを追加。OAuth は Relay-MCP `auth.ts` パターン流用 (自前 OAuth 2.1 サーバー、JWT audience を `https://image-hub.your-host.example.com` に bind、admin passcode で consent 承認)。
 
 ### 3.4 配置・常駐
 
-- 実装フォルダ: `/home/kite/image-hub/` (relay と同パターン、独立 compose)
+- 実装フォルダ: `/path/to/image-hub/` (relay と同パターン、独立 compose)
 - compose で 5 サービス並列稼働: `openai-image-mcp` / `excalidraw-mcp` / `mermaid-mcp` / `files-server` / `oauth-server`
 - ストレージは compose volume + bind mount (Phase 2.A で具体化)
 
 ### 3.5 生成物の返し方
 
-MCP レスポンス JSON: `{ "id": "abc123", "url": "https://image-hub.kitepon.dev/files/abc123.png", "mime": "image/png", "schema_version": 1 }`
+MCP レスポンス JSON: `{ "id": "abc123", "url": "https://image-hub.your-host.example.com/files/abc123.png", "mime": "image/png", "schema_version": 1 }`
 
 - サーバー側ストレージに保存 → URL 返却 (一時 URL ではなく永続)
 - 小さい図 (mermaid SVG など) は base64 inline でも返す選択肢を残す
@@ -155,9 +155,9 @@ MCP レスポンス JSON: `{ "id": "abc123", "url": "https://image-hub.kitepon.d
 
 詳細は [PHASE0-findings.md](PHASE0-findings.md) 参照。12 項目すべて判明事実 + 採用方針が文書化済み。進路 (c) 確定。
 
-唯一残った確認: **GitHub `kazyam53/openai_gen_image_mcp` の `uv tool install` を 192.168.1.2 で実行する許可**。
+唯一残った確認: **GitHub `kazyam53/openai_gen_image_mcp` の `uv tool install` を YOUR_SERVER_IP で実行する許可**。
 
-### Phase 2.A: 192.168.1.2 にデプロイ・集約 (完了 ✅ 2026-05-03)
+### Phase 2.A: YOUR_SERVER_IP にデプロイ・集約 (完了 ✅ 2026-05-03)
 
 #### 2.A Day-1 (鍵集約前ゲート、すべて pass するまで `OPENAI_API_KEY` を `.env` に置かない)
 
@@ -166,21 +166,21 @@ MCP レスポンス JSON: `{ "id": "abc123", "url": "https://image-hub.kitepon.d
 | 2.A.D-1 | OpenAI Platform 側のクレジットガード一式設定 (auto-recharge OFF + 月初チャージ額制限 + usage limit) | OpenAI 管理画面で auto-recharge OFF + 月額上限が見える | ✅ |
 | 2.A.D-2 | 内部 MCP / hub web の listen を LAN 限定 (`0.0.0.0` 禁止)、外向きは Caddy のみ | LAN 外から内部ポートに `curl` 不可 | ✅ |
 | 2.A.D-3 | バックアップ最小実装 (`rsync + cron`) を稼働 + テスト用ダミー `.env` で exclude pattern を実機検証 | 翌日にコピー存在 + ダミー `.env` が退避先に**出ていない** | ✅ |
-| 2.A.D-4 | `image-hub.kitepon.dev` を Caddy ホストブロックに追加 + TLS 自動発行 | `https://image-hub.kitepon.dev/` に LAN 内 / 出先想定経路の両方から接続可能、有効な証明書 | ✅ |
-| 2.A.D-5 | OAuth 2.1 サーバーを実装 (Relay-MCP `auth.ts` 流用、audience を `https://image-hub.kitepon.dev` に差し替え)。Caddy で OAuth gate 動作 | 未認可 POST /mcp/* が 401 + `WWW-Authenticate: Bearer ... resource_metadata=...`、Claude Code から MCP セッション張れる | ✅ |
+| 2.A.D-4 | `image-hub.your-host.example.com` を Caddy ホストブロックに追加 + TLS 自動発行 | `https://image-hub.your-host.example.com/` に LAN 内 / 出先想定経路の両方から接続可能、有効な証明書 | ✅ |
+| 2.A.D-5 | OAuth 2.1 サーバーを実装 (Relay-MCP `auth.ts` 流用、audience を `https://image-hub.your-host.example.com` に差し替え)。Caddy で OAuth gate 動作 | 未認可 POST /mcp/* が 401 + `WWW-Authenticate: Bearer ... resource_metadata=...`、Claude Code から MCP セッション張れる | ✅ |
 
 #### 2.A Week-2 (Phase 2.A 完了までに揃える)
 
 | # | タスク | 検証 | 状態 |
 |---|---|---|---|
 | 2.A-1 | 各 MCP を HTTP wrapper で包む。`excalidraw` は既存 Dockerfile 流用、`mermaid` は Chromium 依存なので別コンテナ + healthcheck + restart policy、`openai-image` は uv tool install Python パッケージ + HTTP wrapper | サーバー側 `curl http://localhost:PORT/mcp` で応答 | ✅ (mcp-proxy で stdio→HTTP 化、Streamable HTTP `/mcp` を使用) |
-| 2.A-2 | `/home/kite/image-hub/compose.yml` で常駐化 (4 サービス: 3 MCP + image-hub-app) | サーバー再起動後の自動起動を確認 | ✅ |
+| 2.A-2 | `/path/to/image-hub/compose.yml` で常駐化 (4 サービス: 3 MCP + image-hub-app) | サーバー再起動後の自動起動を確認 | ✅ |
 | 2.A-3a | 鍵集約前: D-3 の rsync exclude pattern を再確認 + 本物 `.env` 配置パス想定でダミーで実機検証 | ダミー `.env` が退避先に出ていない | ✅ |
 | 2.A-3b | Day-1 + 2.A-3a が pass した上で、本物 `OPENAI_API_KEY` をサーバー `.env` に集約 + **同時に Windows / WSL2 クライアント側 `~/.claude.json` から鍵削除** | クライアント側に鍵なし、サーバーで動く、`storage/` のバックアップに `.env` が含まれない | ✅ |
 | 2.A-4 | 各 MCP のレスポンスを `{id, url, mime, schema_version}` 形式に統一 (§3.5)。メタデータ schema を SQLite or JSON で永続 | レスポンス JSON に url + schema_version、ブラウザで `/files/{id}` が開ける | ✅ (`image-hub-app/src/storage.ts` + `/files/{id}`) |
 | 2.A-5 | ハブ側予算上限 / レート制限 / 異常検知の Week-2 部分実装 (§3.7)。設定値は Phase 0-8 で確定 | 上限超過で 429、通知が届く | ⏳ 残 |
 | 2.A-6 | アクセス監視 (OAuth ログ + リクエスト急増検知) のアラート設定 | アラート送信が検知できる | ⏳ 残 |
-| 2.A-7 | LAN 内別マシンから `curl https://image-hub.kitepon.dev/mcp/openai-image` (OAuth トークン付き) で疎通 | 200 応答 × 3 | ✅ (WSL2 から e2e テスト済) |
+| 2.A-7 | LAN 内別マシンから `curl https://image-hub.your-host.example.com/mcp/openai-image` (OAuth トークン付き) で疎通 | 200 応答 × 3 | ✅ (WSL2 から e2e テスト済) |
 | 2.A-8a | クライアント側 (Claude Code 設定 / skill / よく使う呼び出しパターン) で `mcp__openai-image__*` 等のレスポンスを「ローカルファイルパス」として消費している箇所を棚卸し → 新形式に書き換え | 棚卸しリスト + 書き換え済みコード (壊れる呼び出しゼロ) | ✅ |
 | 2.A-8b | Windows + WSL2 の `~/.claude.json` を HTTPS URL に書き換え (二段階: 新ブロック追加 → 旧 stdio 削除、書き換え前にバックアップ) | 両クライアントから 3 ツール見え、サンプル生成が成功 | ✅ (WSL2 ✅ / Windows 設定書き換え済、実接続確認は別途) |
 
@@ -234,7 +234,7 @@ MCP レスポンス JSON: `{ "id": "abc123", "url": "https://image-hub.kitepon.d
 - **MCP 設定先**: `~/.claude/settings.json` は `mcpServers` を受け付けない。`~/.claude.json` か `.mcp.json` 経由 (caveat: `settings-mcpservers-rejected`)
 - **claude-spotter の Windows MCP 収集**: 1.2.2 以上でないと `mcp__mermaid__*` / `mcp__openai-image__*` の収集に失敗
 - **OPENAI_API_KEY 露出**: 旧鍵が本チャットで露出済み → Phase 3-2 で再発行済 ✅ → さらに 2026-05-18 の §7 切替で OpenAI 経路自体を廃止、新鍵も unbind 済
-- **kitepon.dev 直下のパス禁止**: 新規 HTTP MCP は必ず独立サブドメイン (本計画書は `image-hub.kitepon.dev`)。直下のパスは ConnectX2C に吸い込まれる (memory: `feedback_subdomain_per_mcp`)
+- **your-host.example.com 直下のパス禁止**: 新規 HTTP MCP は必ず独立サブドメイン (本計画書は `image-hub.your-host.example.com`)。直下のパスは ConnectX2C に吸い込まれる (memory: `feedback_subdomain_per_mcp`)
 - **デフォルト互換性**: 層 II/III 実装時に既存ツールの引数を変更しない。新引数は必ず optional、新機能は必ず別 MCP
 - **キャッシュ default 方向**: 画像生成は非決定性が前提なので default OFF + `use_cache=true` 明示時のみ hit (default ON にすると「もう一枚」で古い画像が返る混乱モード)
 - **生成物消失リスク**: §3.8 のバックアップを Phase 2.A で必ず稼働。ハブ集約 = 1 ホスト全損リスク化
@@ -259,7 +259,7 @@ MCP レスポンス JSON: `{ "id": "abc123", "url": "https://image-hub.kitepon.d
 ## 6. 実装フォルダ構成
 
 ```
-/home/kite/image-hub/
+/path/to/image-hub/
 ├── compose.yml              # 5 サービス: openai-image-mcp / excalidraw-mcp / mermaid-mcp / files-server / oauth-server
 ├── .env                     # OPENAI_API_KEY / OAUTH_SIGNING_KEY / ADMIN_PASSCODE 等 (バックアップ exclude)
 ├── .env.example             # 雛形
@@ -267,7 +267,7 @@ MCP レスポンス JSON: `{ "id": "abc123", "url": "https://image-hub.kitepon.d
 ├── excalidraw-mcp/          # 既存 yctimlin/mcp_excalidraw の Dockerfile を流用
 ├── mermaid-mcp/             # claude-mermaid + Node コンテナ + 自前 HTTP wrapper + Chromium healthcheck
 ├── files-server/            # /files/{id} 配信 + メタデータ DB (SQLite)
-├── oauth-server/            # Relay-MCP auth.ts パターン流用 (audience: image-hub.kitepon.dev)
+├── oauth-server/            # Relay-MCP auth.ts パターン流用 (audience: image-hub.your-host.example.com)
 ├── storage/                 # bind mount 先 (画像/SVG/メタデータ、バックアップ対象)
 └── future/                  # Phase 4 用の層 II/III 実装スケルトン
     ├── pipeline-mcp/
@@ -275,17 +275,17 @@ MCP レスポンス JSON: `{ "id": "abc123", "url": "https://image-hub.kitepon.d
     └── fal-mcp/
 ```
 
-Caddy 設定は `/home/kite/ConnectC2X/Caddyfile` (またはマウント元の真ファイル) に下記ホストブロックを追加:
+Caddy 設定は `/path/to/ConnectC2X/Caddyfile` (またはマウント元の真ファイル) に下記ホストブロックを追加:
 
 ```caddy
-image-hub.kitepon.dev {
+image-hub.your-host.example.com {
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
         X-Content-Type-Options "nosniff"
         -X-Powered-By
         -Server
     }
-    reverse_proxy 192.168.1.2:<image-hub の外向きポート> {
+    reverse_proxy YOUR_SERVER_IP:<image-hub の外向きポート> {
         flush_interval -1
     }
 }
@@ -306,7 +306,7 @@ Phase 2.A / 3-2 までは `openai-image` ルートが OpenAI Platform に直課�
 | `openai-image-mcp` コンテナの中身 | `kazyam53/openai_gen_image_mcp` (Python、uv tool install) | 自前 [server.py](../server/openai-image-mcp/server.py) (fastmcp ラッパ、 HermesAgent MCP に JSON-RPC で `tools/call generate_image` を投げる) |
 | `OPENAI_API_KEY` | `.env` 必須 | 廃止 (.env.example からも削除) |
 | 新環境変数 | — | `HERMES_MCP_URL` / `HERMES_OAUTH_STATE_PATH` (OAuth state file path, default `/var/lib/hermes-oauth/state.json`) |
-| Hermes 認証 | — | MCP 標準 OAuth 2.1 (DCR + authorization_code + refresh_token rotation)。 初回 consent は [bootstrap_oauth.py](../server/openai-image-mcp/bootstrap_oauth.py) をブラウザがある手元のマシンで 1 回走らせ、 出力 state を prod の `/home/kite/image-hub/hermes_oauth/state.json` に scp → compose.yml の bind mount でコンテナから rw。 server.py が refresh_token rotation を自動運用、 新 token を atomic write (.tmp → rename + chmod 0o600) で書き戻し |
+| Hermes 認証 | — | MCP 標準 OAuth 2.1 (DCR + authorization_code + refresh_token rotation)。 初回 consent は [bootstrap_oauth.py](../server/openai-image-mcp/bootstrap_oauth.py) をブラウザがある手元のマシンで 1 回走らせ、 出力 state を prod の `/path/to/image-hub/hermes_oauth/state.json` に scp → compose.yml の bind mount でコンテナから rw。 server.py が refresh_token rotation を自動運用、 新 token を atomic write (.tmp → rename + chmod 0o600) で書き戻し |
 | 課金経路 | OpenAI Platform (prepaid + クレジットガード) | HermesAgent 側の SuperGrok / Premium Plus OAuth セッション (実質ゼロ) |
 | `sitecustomize.py` monkey-patch | あり (Python `tempfile.mkdtemp` の 0o700 を 0o755 に補正) | server.py 内で `os.chmod(sub, 0o755)` を明示呼び出し、ファイル削除 |
 | 互換維持の範囲 | — | service 名 `openai-image-mcp` / volume 名 `openai-image-tmp` / 出力 path 形式 `/var/lib/openai-image-tmp/openai_gen_image_*/generated_*.{png,jpg,webp}` / image-hub-app の REWRITE_RULES key `openai-image` / クライアントの `~/.claude.json` URL `/mcp/openai-image` — すべて温存 |
@@ -323,13 +323,13 @@ Phase 2.A / 3-2 までは `openai-image` ルートが OpenAI Platform に直課�
 
 ### 残作業 (運用)
 
-- [x] e2e 検証 (2026-05-18): `tools/call generate_image` → `https://image-hub.kitepon.dev/files/<sha12>.jpg` 配信まで成功
-- [x] NAT hairpin 回避: `hermes.kitepon.dev` を public DNS で引くと自分の WAN IP に解決 → 接続 timeout。 compose.yml の `extra_hosts: ["hermes.kitepon.dev:192.168.1.2"]` で LAN 直結に切り替えて解決
+- [x] e2e 検証 (2026-05-18): `tools/call generate_image` → `https://image-hub.your-host.example.com/files/<sha12>.jpg` 配信まで成功
+- [x] NAT hairpin 回避: `hermes.your-host.example.com` を public DNS で引くと自分の WAN IP に解決 → 接続 timeout。 compose.yml の `extra_hosts: ["hermes.your-host.example.com:YOUR_SERVER_IP"]` で LAN 直結に切り替えて解決
 - [x] **refresh_token 30 日 TTL アイドル失効の自動回避**: prod に [server/cron/image-hub-hermes-keepalive](../server/cron/image-hub-hermes-keepalive) を `/etc/cron.d/` に設置済。 毎週日曜 04:00 に [server/openai-image-mcp/keepalive.py](../server/openai-image-mcp/keepalive.py) (`ensure_fresh_access_token(force=True)` で refresh_token grant を 1 回踏むだけ、 画像生成 quota の消費なし) を `docker exec` 経由で叩いて rotation を踏ませる。 「3 ヶ月使わなくて 401 → 再 bootstrap」ケースを根絶
 - [x] **structuredContent leak fix** (commit `e727a8b`): fastmcp 系上流は tools/call レスポンスで content[] と structuredContent.result[] に同じテキストを mirror するため、 後者にも container 内 path (`/var/lib/openai-image-tmp/...`) が漏れていた。 [server/image-hub-app/src/intercept.ts](../server/image-hub-app/src/intercept.ts) の `rewriteSseEventBlock` を両フィールド対応に拡張、 検証で `grep -c /var/lib/openai-image-tmp = 0` 確認
 - [x] **access token 1 時間 TTL の事前更新** (2026-05-20): MCP SDK は access_token の有効期限を state ファイルから復元しないため、 server.py / keepalive.py のように呼び出しごとに新規 provider を作る運用では「token は常に有効」と誤判定し、 期限切れ token を投げて 401 を踏む。 X-HERMES 検証で SDK の 401 後動線は refresh_token grant ではなく authorization_code grant (ブラウザ consent) に直行すると判明 — headless コンテナでは server.py の `_refuse_redirect` が発火して即死する。 対策として [server/openai-image-mcp/hermes_oauth.py](../server/openai-image-mcp/hermes_oauth.py) を新設し、 Hermes を叩く前に `ensure_fresh_access_token()` が state の絶対時刻 `expires_at` を見て期限間近なら token endpoint に refresh_token grant を直接 POST して事前更新する。 並行プロジェクト Chime の `chime/hermes_client.py` と同一パターン。 keepalive.py も tools/list を投げる構造から `ensure_fresh_access_token(force=True)` 直呼びに変更した
-- [ ] HermesAgent サブドメイン (`hermes.kitepon.dev`) と Hermes プロセス自体の安定運用継続観察。Hermes が落ちると image-hub の openai-image ルートも 5xx
-- [ ] OAuth state ファイル (`/home/kite/image-hub/hermes_oauth/state.json`) のバックアップ運用。失うと re-bootstrap が必要 (= ブラウザ consent をもう 1 回回す)
+- [ ] HermesAgent サブドメイン (`hermes.your-host.example.com`) と Hermes プロセス自体の安定運用継続観察。Hermes が落ちると image-hub の openai-image ルートも 5xx
+- [ ] OAuth state ファイル (`/path/to/image-hub/hermes_oauth/state.json`) のバックアップ運用。失うと re-bootstrap が必要 (= ブラウザ consent をもう 1 回回す)
 - [ ] 旧 OpenAI 鍵 (`image-hub` project key) の最終 unbind 確認 (OpenAI Platform 管理画面で revoke)
 - [ ] 新スキーマで失敗するクライアント呼び出しが残っていないか、初回数回の呼び出しログで確認
 

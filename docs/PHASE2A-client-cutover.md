@@ -22,33 +22,33 @@
 
 | MCP 名 | 公開 URL (Claude Code config に書く) | type |
 |---|---|---|
-| `openai-image` | `https://image-hub.kitepon.dev/mcp/openai-image` | `http` |
-| `excalidraw`   | `https://image-hub.kitepon.dev/mcp/excalidraw`   | `http` |
-| `mermaid`      | `https://image-hub.kitepon.dev/mcp/mermaid`      | `http` |
+| `openai-image` | `https://image-hub.your-host.example.com/mcp/openai-image` | `http` |
+| `excalidraw`   | `https://image-hub.your-host.example.com/mcp/excalidraw`   | `http` |
+| `mermaid`      | `https://image-hub.your-host.example.com/mcp/mermaid`      | `http` |
 
 > **transport は Streamable HTTP**: SSE は採用しない (リバプロ越しで `messages?sessionId=...` の relative URL が host root に飛んで 404 になる)。詳細は memory `feedback_mcp_proxy_streamable_http` 参照。
 > 接続時に Claude Code は `/.well-known/oauth-protected-resource/mcp` を辿って OAuth フロー (admin passcode) に進む。
 
-### Windows 側 `~/.claude.json` (= `C:\Users\kite_\.claude.json`)
+### Windows 側 `~/.claude.json` (= `C:\Users\youruser\.claude.json`)
 
 #### 旧 (削除する)
 `mcpServers` の中の `openai-image` / `excalidraw` / `mermaid` 3 ブロックを **丸ごと削除**。
-- `openai-image` ブロックの `env.OPENAI_API_KEY` の値が露出した旧鍵 (`sk-proj-OQjmm...`) なので、削除と同時に OpenAI ダッシュボードで revoke 必須。
+- `openai-image` ブロックの `env.OPENAI_API_KEY` の値が露出した旧鍵 (`sk-proj-...`) なので、削除と同時に OpenAI ダッシュボードで revoke 必須。
 - 削除前に `~/.claude.json.bak-YYYYMMDD` で必ずバックアップ。
 
 #### 新 (追加する)
 ```json
 "openai-image": {
   "type": "http",
-  "url": "https://image-hub.kitepon.dev/mcp/openai-image"
+  "url": "https://image-hub.your-host.example.com/mcp/openai-image"
 },
 "excalidraw": {
   "type": "http",
-  "url": "https://image-hub.kitepon.dev/mcp/excalidraw"
+  "url": "https://image-hub.your-host.example.com/mcp/excalidraw"
 },
 "mermaid": {
   "type": "http",
-  "url": "https://image-hub.kitepon.dev/mcp/mermaid"
+  "url": "https://image-hub.your-host.example.com/mcp/mermaid"
 }
 ```
 
@@ -58,7 +58,7 @@ Copy-Item $HOME\.claude.json $HOME\.claude.json.bak-$(Get-Date -Format yyyyMMdd)
 notepad $HOME\.claude.json
 ```
 
-### WSL2 側 `~/.claude.json` (= `/home/kite/.claude.json`)
+### WSL2 側 `~/.claude.json` (= `/path/to/.claude.json`)
 
 WSL2 側にはこれら 3 MCP は登録されていないので **追加のみ**。`mcpServers` オブジェクトに上の 3 ブロックを追記する。
 
@@ -66,16 +66,16 @@ WSL2 側にはこれら 3 MCP は登録されていないので **追加のみ**
 cp ~/.claude.json ~/.claude.json.bak-$(date +%Y%m%d)
 # jq があるなら:
 jq '.mcpServers += {
-  "openai-image": {"type":"http","url":"https://image-hub.kitepon.dev/mcp/openai-image"},
-  "excalidraw":   {"type":"http","url":"https://image-hub.kitepon.dev/mcp/excalidraw"},
-  "mermaid":      {"type":"http","url":"https://image-hub.kitepon.dev/mcp/mermaid"}
+  "openai-image": {"type":"http","url":"https://image-hub.your-host.example.com/mcp/openai-image"},
+  "excalidraw":   {"type":"http","url":"https://image-hub.your-host.example.com/mcp/excalidraw"},
+  "mermaid":      {"type":"http","url":"https://image-hub.your-host.example.com/mcp/mermaid"}
 }' ~/.claude.json > ~/.claude.json.new && mv ~/.claude.json.new ~/.claude.json
 ```
 
 ## サーバー側 `.env` 新鍵反映
 
 ```bash
-ssh kite@192.168.1.2 'cd /home/kite/image-hub && \
+ssh youruser@YOUR_SERVER_IP 'cd /path/to/image-hub && \
   cp .env .env.bak-$(date +%Y%m%d) && \
   sed -i "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=sk-proj-NEWKEY_HERE|" .env && \
   docker compose restart image-hub openai-image-mcp'
@@ -87,8 +87,8 @@ ssh kite@192.168.1.2 'cd /home/kite/image-hub && \
 
 ```bash
 rsync -av --exclude .env --exclude storage/ --exclude '_relay-*' --exclude 'node_modules' \
-  /home/kite/projects/image-generator/server/ kite@192.168.1.2:/home/kite/image-hub/
-ssh kite@192.168.1.2 'cd /home/kite/image-hub && docker compose up -d --build'
+  /path/to/image-generator/server/ youruser@YOUR_SERVER_IP:/path/to/image-hub/
+ssh youruser@YOUR_SERVER_IP 'cd /path/to/image-hub && docker compose up -d --build'
 ```
 
 ## OAuth 認可の進め方 (3 サーバー初回)
@@ -107,12 +107,12 @@ CLI 経由 (`mcp__<name>__authenticate` ツール) なら、URL を渡されて�
 
 ```bash
 # 1. OAuth metadata
-curl -s https://image-hub.kitepon.dev/.well-known/oauth-authorization-server | python3 -m json.tool
+curl -s https://image-hub.your-host.example.com/.well-known/oauth-authorization-server | python3 -m json.tool
 # 2. 401 challenge (Streamable HTTP エンドポイント)
-curl -i -X POST https://image-hub.kitepon.dev/mcp/excalidraw \
+curl -i -X POST https://image-hub.your-host.example.com/mcp/excalidraw \
   -H 'content-type: application/json' -d '{}' | head -5
 # 3. healthcheck pass を確認
-ssh kite@192.168.1.2 'docker ps --format "{{.Names}}\t{{.Status}}"'
+ssh youruser@YOUR_SERVER_IP 'docker ps --format "{{.Names}}\t{{.Status}}"'
 # 全 4 コンテナが (healthy) になっていること
 ```
 

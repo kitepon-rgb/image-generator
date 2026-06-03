@@ -1,11 +1,11 @@
 # image-hub server
 
-`image-hub.kitepon.dev` サブドメインに OAuth 2.1 経由で 3 MCP (`openai-image` / `excalidraw` / `mermaid`) を集約するサーバー実装一式。
+`image-hub.your-host.example.com` サブドメインに OAuth 2.1 経由で 3 MCP (`openai-image` / `excalidraw` / `mermaid`) を集約するサーバー実装一式。
 
 > Phase 2.A 完了 (2026-05-03)。3 MCP すべて Connected + e2e テスト成功。
 > 計画書は `../docs/PLAN-mcp-image-hub.md`、Phase 0 調査結果は `../docs/PHASE0-findings.md`、クライアント切替手順は `../docs/PHASE2A-client-cutover.md`。
 
-**2026-05-18 更新**: `openai-image-mcp` の中身を `kazyam53/openai_gen_image_mcp` から自前の HermesAgent ラッパに差し替え、OpenAI 課金経路を切り離した。詳細は [`../docs/PLAN-mcp-image-hub.md` §7](../docs/PLAN-mcp-image-hub.md)。service 名 / volume 名 / 出力 path 形式 / `~/.claude.json` URL は互換維持、tool schema は HermesAgent 互換 (`prompt` / `aspect_ratio` / `resolution` / `quality(bool)`) に変更。Hermes への認証は **MCP 標準 OAuth 2.1** (DCR + authorization_code + refresh_token rotation)。新環境変数: `HERMES_MCP_URL` + `HERMES_OAUTH_STATE_PATH` (旧 `OPENAI_API_KEY` は削除)。初回 consent はローカルで [`openai-image-mcp/bootstrap_oauth.py`](openai-image-mcp/bootstrap_oauth.py) を 1 回走らせて state ファイルを生成 → prod の `/home/kite/image-hub/hermes_oauth/state.json` に scp。以降は server.py が refresh_token rotation を自動運用 (access token の 1 時間 TTL は [`openai-image-mcp/hermes_oauth.py`](openai-image-mcp/hermes_oauth.py) の `ensure_fresh_access_token()` が Hermes 呼び出し直前に事前更新)。NAT hairpin 回避のため `compose.yml` の openai-image-mcp に `extra_hosts: ["hermes.kitepon.dev:192.168.1.2"]` も必要。
+**2026-05-18 更新**: `openai-image-mcp` の中身を `kazyam53/openai_gen_image_mcp` から自前の HermesAgent ラッパに差し替え、OpenAI 課金経路を切り離した。詳細は [`../docs/PLAN-mcp-image-hub.md` §7](../docs/PLAN-mcp-image-hub.md)。service 名 / volume 名 / 出力 path 形式 / `~/.claude.json` URL は互換維持、tool schema は HermesAgent 互換 (`prompt` / `aspect_ratio` / `resolution` / `quality(bool)`) に変更。Hermes への認証は **MCP 標準 OAuth 2.1** (DCR + authorization_code + refresh_token rotation)。新環境変数: `HERMES_MCP_URL` + `HERMES_OAUTH_STATE_PATH` (旧 `OPENAI_API_KEY` は削除)。初回 consent はローカルで [`openai-image-mcp/bootstrap_oauth.py`](openai-image-mcp/bootstrap_oauth.py) を 1 回走らせて state ファイルを生成 → prod の `/path/to/image-hub/hermes_oauth/state.json` に scp。以降は server.py が refresh_token rotation を自動運用 (access token の 1 時間 TTL は [`openai-image-mcp/hermes_oauth.py`](openai-image-mcp/hermes_oauth.py) の `ensure_fresh_access_token()` が Hermes 呼び出し直前に事前更新)。NAT hairpin 回避のため `compose.yml` の openai-image-mcp に `extra_hosts: ["hermes.your-host.example.com:YOUR_SERVER_IP"]` も必要。
 
 ## 構成
 
@@ -18,7 +18,7 @@
 
 ### transport / proxy の方針
 
-- **Client → image-hub**: Streamable HTTP (`type: "http"` in `~/.claude.json`)、URL `https://image-hub.kitepon.dev/mcp/{name}`、Bearer 認証
+- **Client → image-hub**: Streamable HTTP (`type: "http"` in `~/.claude.json`)、URL `https://image-hub.your-host.example.com/mcp/{name}`、Bearer 認証
 - **image-hub → upstream**: `node:fetch` で POST/GET/DELETE をそのまま転送 (HOP_BY_HOP ヘッダーは除外)。実装は `image-hub-app/src/index.ts` の `app.all(mcpPath, bearer, async ...)` ブロック
 - **upstream の mcp-proxy**: Streamable HTTP `/mcp` を expose (`mcp-proxy` 6.x のデフォルト)、SSE `/sse` も同居しているが image-hub は Streamable HTTP しか叩かない
 
@@ -42,38 +42,38 @@ echo "IMAGEHUB_ADMIN_PASSCODE=$(openssl rand -base64 18)" >> .env
 
 # サーバーへ転送 (.env と _relay-* は除外)
 rsync -av --exclude .env --exclude storage/ --exclude '_relay-*' --exclude 'node_modules' \
-  /home/kite/projects/image-generator/server/ kite@192.168.1.2:/home/kite/image-hub/
+  /path/to/projects/image-generator/server/ youruser@YOUR_SERVER_IP:/path/to/image-hub/
 
 # .env のみ別途転送
-scp .env kite@192.168.1.2:/home/kite/image-hub/.env
+scp .env youruser@YOUR_SERVER_IP:/path/to/image-hub/.env
 
 # サーバー側でバックアップ最小実装 (ダミー .env で exclude 検証)
-ssh kite@192.168.1.2 'echo OPENAI_API_KEY=DUMMY > /home/kite/image-hub/.env.test && \
-  rsync -av --exclude ".env*" /home/kite/image-hub/ /tmp/image-hub-backup-test/ && \
+ssh youruser@YOUR_SERVER_IP 'echo OPENAI_API_KEY=DUMMY > /path/to/image-hub/.env.test && \
+  rsync -av --exclude ".env*" /path/to/image-hub/ /tmp/image-hub-backup-test/ && \
   ls /tmp/image-hub-backup-test/.env* 2>&1 || echo "OK: .env not in backup"'
 ```
 
 #### 2.A.D-4 サブドメイン取得 + TLS
 
 ```bash
-ssh kite@192.168.1.2 'cat /home/kite/image-hub/caddy/image-hub.snippet >> /home/kite/license-server/Caddyfile && \
+ssh youruser@YOUR_SERVER_IP 'cat /path/to/image-hub/caddy/image-hub.snippet >> /path/to/license-server/Caddyfile && \
   docker exec caddy caddy reload --config /etc/caddy/Caddyfile'
 
-curl -i https://image-hub.kitepon.dev/healthz
+curl -i https://image-hub.your-host.example.com/healthz
 # まだ image-hub サービス未起動なので 502、TLS 証明書は OK
 ```
 
 #### 2.A.D-5 image-hub-app + 3 MCP 起動
 
 ```bash
-ssh kite@192.168.1.2 'cd /home/kite/image-hub && docker compose up -d --build'
+ssh youruser@YOUR_SERVER_IP 'cd /path/to/image-hub && docker compose up -d --build'
 
 # OAuth metadata 確認 (RFC 8414 + RFC 9728)
-curl -s https://image-hub.kitepon.dev/.well-known/oauth-authorization-server | jq .
-curl -s https://image-hub.kitepon.dev/.well-known/oauth-protected-resource/mcp | jq .
+curl -s https://image-hub.your-host.example.com/.well-known/oauth-authorization-server | jq .
+curl -s https://image-hub.your-host.example.com/.well-known/oauth-protected-resource/mcp | jq .
 
 # 未認可リクエストが 401 + WWW-Authenticate を返す
-curl -i -X POST https://image-hub.kitepon.dev/mcp/openai-image \
+curl -i -X POST https://image-hub.your-host.example.com/mcp/openai-image \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'
 ```
@@ -84,8 +84,8 @@ curl -i -X POST https://image-hub.kitepon.dev/mcp/openai-image \
 
 ```bash
 # サーバー側 .env に Phase 3-2 で再発行した新 OPENAI_API_KEY を書く
-ssh kite@192.168.1.2 'sed -i "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=sk-proj-NEWKEY|" /home/kite/image-hub/.env && \
-  cd /home/kite/image-hub && docker compose restart image-hub openai-image-mcp'
+ssh youruser@YOUR_SERVER_IP 'sed -i "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=sk-proj-NEWKEY|" /path/to/image-hub/.env && \
+  cd /path/to/image-hub && docker compose restart image-hub openai-image-mcp'
 
 # 同時に Windows / WSL2 クライアント側 ~/.claude.json から openai-image の鍵削除
 ```
@@ -93,9 +93,9 @@ ssh kite@192.168.1.2 'sed -i "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=sk-proj-NEWKEY
 #### 2.A-8a クライアント側 .claude.json を HTTPS URL に書き換え
 
 ```jsonc
-"openai-image": { "type": "http", "url": "https://image-hub.kitepon.dev/mcp/openai-image" },
-"excalidraw":   { "type": "http", "url": "https://image-hub.kitepon.dev/mcp/excalidraw" },
-"mermaid":      { "type": "http", "url": "https://image-hub.kitepon.dev/mcp/mermaid" }
+"openai-image": { "type": "http", "url": "https://image-hub.your-host.example.com/mcp/openai-image" },
+"excalidraw":   { "type": "http", "url": "https://image-hub.your-host.example.com/mcp/excalidraw" },
+"mermaid":      { "type": "http", "url": "https://image-hub.your-host.example.com/mcp/mermaid" }
 ```
 
 OAuth トークン取得は Claude Code の MCP HTTP transport が動的に処理 (Dynamic Client Registration 経由)。初回は admin passcode で consent 承認が必要。
@@ -118,7 +118,7 @@ OAuth トークン取得は Claude Code の MCP HTTP transport が動的に処�
      # ローカル .env を差し替え
      sed -i "s|^IMAGEHUB_STATIC_BEARER_TOKEN=.*|IMAGEHUB_STATIC_BEARER_TOKEN=$NEW|" .env
      # 本番側を更新
-     ssh kite@192.168.1.2 "sed -i 's|^IMAGEHUB_STATIC_BEARER_TOKEN=.*|IMAGEHUB_STATIC_BEARER_TOKEN=$NEW|' /home/kite/image-hub/.env && cd /home/kite/image-hub && docker compose up -d --build image-hub"
+     ssh youruser@YOUR_SERVER_IP "sed -i 's|^IMAGEHUB_STATIC_BEARER_TOKEN=.*|IMAGEHUB_STATIC_BEARER_TOKEN=$NEW|' /path/to/image-hub/.env && cd /path/to/image-hub && docker compose up -d --build image-hub"
      # 静的 bearer を使う各クライアント (Bell の .mcp.json 等) も同期更新
      ```
 3. **OAuth bearer**: 上 2 つに該当しなければ従来通り `requireBearerAuth` で audience-bound JWT を検証。
@@ -130,25 +130,25 @@ TOKEN=<IMAGEHUB_STATIC_BEARER_TOKEN の値>
 HDR=$(mktemp)
 # 1) anon initialize → 200
 curl -sS -o /dev/null -D "$HDR" -w '1) %{http_code}\n' \
-  -X POST https://image-hub.kitepon.dev/mcp/mermaid \
+  -X POST https://image-hub.your-host.example.com/mcp/mermaid \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"v","version":"1"}}}'
 SID=$(grep -i '^mcp-session-id:' "$HDR" | tr -d '\r' | awk '{print $2}')
 # 2) anon tools/list → 200
 curl -sS -o /dev/null -w '2) %{http_code}\n' \
-  -X POST https://image-hub.kitepon.dev/mcp/mermaid \
+  -X POST https://image-hub.your-host.example.com/mcp/mermaid \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -H "mcp-session-id: $SID" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 # 3) anon tools/call → 401
 curl -sS -o /dev/null -w '3) %{http_code}\n' \
-  -X POST https://image-hub.kitepon.dev/mcp/mermaid \
+  -X POST https://image-hub.your-host.example.com/mcp/mermaid \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -H "mcp-session-id: $SID" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"x"}}'
 # 4) wrong bearer → 401 (500 ではない)
 curl -sS -o /dev/null -w '4) %{http_code}\n' \
-  -X POST https://image-hub.kitepon.dev/mcp/mermaid \
+  -X POST https://image-hub.your-host.example.com/mcp/mermaid \
   -H 'Authorization: Bearer wrong-token-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -H "mcp-session-id: $SID" \
@@ -156,13 +156,13 @@ curl -sS -o /dev/null -w '4) %{http_code}\n' \
 # 5) static-bearer tools/call → 200 (引数不正の application エラーは可)
 HDR2=$(mktemp)
 curl -sS -o /dev/null -D "$HDR2" \
-  -X POST https://image-hub.kitepon.dev/mcp/mermaid \
+  -X POST https://image-hub.your-host.example.com/mcp/mermaid \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"v","version":"1"}}}'
 SID2=$(grep -i '^mcp-session-id:' "$HDR2" | tr -d '\r' | awk '{print $2}')
 curl -sS -o /dev/null -w '5) %{http_code}\n' \
-  -X POST https://image-hub.kitepon.dev/mcp/mermaid \
+  -X POST https://image-hub.your-host.example.com/mcp/mermaid \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -H "mcp-session-id: $SID2" \
@@ -184,13 +184,13 @@ curl -sS -o /dev/null -w '5) %{http_code}\n' \
 
 ```bash
 # 日次 cron (Phase 2.A.D-3 で稼働)
-rsync -a --exclude '.env*' /home/kite/image-hub/storage/ /backup/image-hub-storage-$(date +%Y%m%d)/
+rsync -a --exclude '.env*' /path/to/image-hub/storage/ /backup/image-hub-storage-$(date +%Y%m%d)/
 ```
 
 `.env` は **必ず exclude**。鍵は別ルート (1Password / pass) で管理。
 
 ## 関連 caveat
 
-- `kitepon.dev` 直下のパスベース MCP 並列は禁止 (memory: `feedback_subdomain_per_mcp`)
+- `your-host.example.com` 直下のパスベース MCP 並列は禁止 (memory: `feedback_subdomain_per_mcp`)
 - `OPENAI_API_KEY` 平文露出が旧 Windows `~/.claude.json` にあり → Phase 3-2 で再発行済 → 2026-05-18 の HermesAgent 切替で OpenAI 経路自体を廃止、新鍵も unbind 済
 - Mermaid CLI の Chromium 依存は別コンテナ + healthcheck で隔離 (compose.yml で対応済み)

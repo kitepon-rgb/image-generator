@@ -4,9 +4,9 @@
 
 # image-hub
 
-[![CI](https://github.com/kitepon-rgb/image-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/kitepon-rgb/image-generator/actions/workflows/ci.yml)
-[![GitHub release](https://img.shields.io/github/v/release/kitepon-rgb/image-generator?color=24292e&logo=github)](https://github.com/kitepon-rgb/image-generator/releases)
-[![license](https://img.shields.io/github/license/kitepon-rgb/image-generator?color=blue)](LICENSE)
+[![CI](https://github.com/kitepon/image-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/kitepon/image-generator/actions/workflows/ci.yml)
+[![GitHub release](https://img.shields.io/github/v/release/kitepon/image-generator?color=24292e&logo=github)](https://github.com/kitepon/image-generator/releases)
+[![license](https://img.shields.io/github/license/kitepon/image-generator?color=blue)](LICENSE)
 
 [English](README.md) · **日本語**
 
@@ -89,7 +89,7 @@ flowchart LR
 > Docker Compose / Caddy / 公開ホスト名がある前提。`image-hub.example.com` は自分のものに置換。
 
 ```bash
-git clone https://github.com/kitepon-rgb/image-generator.git
+git clone https://github.com/kitepon/image-generator.git
 cd image-generator/server
 
 cp .env.example .env
